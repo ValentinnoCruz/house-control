@@ -1,7 +1,7 @@
 // Loads and normalises a floor plan ("home.json"). Everything the 3D scene and the UI
 // know about the apartment comes from this one document, so swapping the file swaps the home.
 
-const LIGHT_TYPES = ['ceiling', 'pendant', 'spots', 'floor', 'table', 'strip'];
+const LIGHT_TYPES = ['ceiling', 'fan', 'fanBulb', 'pendant', 'spots', 'floor', 'table', 'strip'];
 const WALLS = ['north', 'south', 'east', 'west'];
 
 export class ConfigError extends Error {}
@@ -9,7 +9,7 @@ export class ConfigError extends Error {}
 export const LIGHT_KINDS = LIGHT_TYPES;
 
 // A lamp or an AC is real when it is linked to a device of a connected platform:
-// `link: { service, id }` (Home Assistant, Philips Hue, Apple Home) or, for Smart Life,
+// `link: { service, id }` (Govee LAN, Home Assistant, Philips Hue, Apple Home) or, for Smart Life,
 // `tuya: { deviceId }`. An AC's `sensor: { service, id }` is a thermometer for its room.
 export const LINK_FIELDS = ['tuya', 'link', 'sensor'];
 
@@ -23,19 +23,25 @@ export const isLinked = (d) => Boolean(linkOf(d));
 
 /** The platforms House Control can link to, in the order the editor lists them. */
 export const SERVICES = {
+  govee: { name: 'Govee (LAN + Cloud)', short: 'Govee' },
   smartlife: { name: 'Smart Life', short: 'Smart Life' },
   homeassistant: { name: 'Home Assistant', short: 'Home Assistant' },
   hue: { name: 'Philips Hue', short: 'Hue' },
   homekit: { name: 'Apple Home', short: 'Apple Home' },
 };
-export const FLOOR_KINDS = ['oak', 'walnut', 'tile', 'stone'];
+export const FLOOR_KINDS = ['oak', 'walnut', 'tile', 'stone', 'rug'];
 
 // The plan exactly as written on disk (the editor works on this form).
 export async function loadRawConfig() {
   const boot = window.__HOUSE_BOOT__;
-  if (boot?.config) return boot.config;
-  const plan = (boot?.plan !== 'custom' && boot?.plan) || new URLSearchParams(location.search).get('plan') || 'home';
-  const res = await fetch(`./plans/${plan}.json`);
+  const urlPlan = new URLSearchParams(location.search).get('plan');
+  if (!urlPlan && boot?.config) return boot.config;
+  const plan = urlPlan || (boot?.plan !== 'custom' && boot?.plan) || 'home';
+  if (plan === 'custom') {
+    const res = await fetch('/api/plan/custom');
+    if (res.ok) return await res.json();
+  }
+  const res = await fetch(`./plans/${plan === 'custom' ? 'home' : plan}.json`);
   if (!res.ok) throw new ConfigError(`Plan "${plan}" not found (HTTP ${res.status})`);
   try {
     return await res.json();

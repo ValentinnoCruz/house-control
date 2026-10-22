@@ -53,6 +53,16 @@ export function createWorld(canvas, config, store, { onHover, onPick, background
     lights.set(cfg.id, unit);
     scene.add(unit.group);
   }
+  // Cap shadow-casting fixture lights so 15+ lights never exceed WebGL's 16-texture unit limit.
+  let shadowBudget = 6;
+  for (const unit of lights.values()) {
+    for (const l of unit.lights) {
+      if (l.castShadow) {
+        if (shadowBudget > 0) shadowBudget--;
+        else l.castShadow = false;
+      }
+    }
+  }
   const acs = new Map();
   for (const cfg of config.acs) {
     const unit = new ACUnit(cfg);

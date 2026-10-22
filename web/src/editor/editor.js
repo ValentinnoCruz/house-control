@@ -6,7 +6,7 @@ import { createWorld } from '../three/world.js';
 import { FURNITURE_TYPES, footprint } from '../three/furniture.js';
 import { h, clamp } from '../ui/dom.js';
 import { icon } from '../ui/icons.js';
-import { isNative, call } from '../bridge.js';
+import { isNative, isWebBackend, call } from '../bridge.js';
 import { createConnections } from './connections.js';
 
 const SVG = 'http://www.w3.org/2000/svg';
@@ -19,7 +19,7 @@ const sv = (tag, attrs = {}, ...kids) => {
 
 const KEYS = { room: 'rooms', light: 'lights', ac: 'acs', furniture: 'furniture', opening: 'openings', scene: 'scenes' };
 const TITLES = { room: 'Rooms', light: 'Lights', ac: 'Air conditioners', furniture: 'Furniture', opening: 'Doors & windows', scene: 'Scenes' };
-const FLOOR_FILL = { oak: '#4a3d2e', walnut: '#3c2f28', tile: '#39424b', stone: '#30353c' };
+const FLOOR_FILL = { oak: '#4a3d2e', walnut: '#3c2f28', tile: '#39424b', stone: '#30353c', rug: '#3d4b66' };
 const WALLS = ['north', 'east', 'south', 'west'];
 const SCENE_ICONS = ['sun', 'sofa', 'film', 'moon', 'door', 'table', 'bed', 'tv', 'sparkles'];
 const REGIONS = [
@@ -43,6 +43,7 @@ export async function bootEditor(root) {
   let dirty = false;
   let world = null;
   let previewLights = true;
+  const collapsedGroups = new Set();
   const undo = [];
   const redo = [];
   const tuya = {
@@ -81,13 +82,15 @@ export async function bootEditor(root) {
     h('header.bar',
       h('div.bar-title', icon('home', 17), nameInput),
       h('div.bar-actions',
+        h('button.btn', { title: 'Show 2D Floor Plan settings', onclick: () => select({ kind: 'home' }) }, icon('box', 14), '2D Floor Plan'),
+        h('button.btn', { title: 'Open the live 3D Control Panel', onclick: () => { location.href = location.pathname; } }, icon('home', 14), '3D Control Panel'),
         h('button.btn', { title: 'Undo (⌘Z)', onclick: () => stepHistory(undo, redo) }, 'Undo'),
         h('button.btn', { title: 'Redo (⇧⌘Z)', onclick: () => stepHistory(redo, undo) }, 'Redo'),
         h('button.btn', { onclick: importPlan }, 'Import…'),
         h('button.btn', { onclick: exportPlan }, 'Export…'),
         saveBtn)),
     sidebar,
-    h('main.canvas', plan, h('div.hint', 'Drag rooms, lamps and furniture · drag a room’s corner to resize · everything snaps to 5 cm')),
+    h('main.canvas', plan, h('div.hint', 'Drag rooms, lamps & furniture · drag blue handles on rooms, furniture or open passages/doors to resize · snaps to 5 cm')),
     h('aside.right', h('div.preview-wrap', previewHost, previewToggle), inspector),
     h('footer.foot', status),
     toastEl));
@@ -208,23 +211,49 @@ export async function bootEditor(root) {
   const roomAt = ([x, z]) => doc.rooms.find((r) => x >= r.rect[0] && x <= r.rect[0] + r.rect[2] && z >= r.rect[1] && z <= r.rect[1] + r.rect[3]);
 
   function renderSidebar() {
-    const nodes = [h(`button.row.home-row${sel.kind === 'home' ? '.active' : ''}`, { onclick: () => select({ kind: 'home' }) },
-      icon('home', 15), h('span.row-name', 'Home settings')),
-    links.sidebarRow(sel.kind === 'connections' || sel.kind === 'service', () => select({ kind: 'connections' }))];
-    for (const kind of Object.keys(KEYS)) {
+    const allKinds = Object.keys(KEYS);
+    const allCollapsed = allKinds.every((k) => collapsedGroups.has(k));
+    const nodes = [
+      h(`button.row.home-row${sel.kind === 'home' ? '.active' : ''}`, { onclick: () => select({ kind: 'home' }) },
+        icon('home', 15), h('span.row-name', 'Home & 2D Floor Plan')),
+      links.sidebarRow(sel.kind === 'connections' || sel.kind === 'service', () => select({ kind: 'connections' })),
+      h('div.group-bar',
+        h('button.btn.link', {
+          onclick: () => {
+            if (allCollapsed) collapsedGroups.clear();
+            else allKinds.forEach((k) => collapsedGroups.add(k));
+            renderSidebar();
+          },
+        }, allCollapsed ? 'Expand all lists' : 'Collapse all lists')),
+    ];
+    for (const kind of allKinds) {
       const items = doc[KEYS[kind]];
-      nodes.push(h('div.group',
+      const isCollapsed = collapsedGroups.has(kind);
+      nodes.push(h('div.group.collapsible', {
+        onclick: () => {
+          if (collapsedGroups.has(kind)) collapsedGroups.delete(kind);
+          else collapsedGroups.add(kind);
+          renderSidebar();
+        },
+      },
+        icon(isCollapsed ? 'next' : 'down', 12, 2.4),
         h('span', `${TITLES[kind]}`), h('span.n', items.length),
-        h('button.add', { title: `Add to ${TITLES[kind].toLowerCase()}`, 'aria-label': `Add ${kind}`, onclick: () => add(kind) }, icon('plus', 14, 2.4))));
-      items.forEach((item, index) => {
-        const [name, sub] = rowLabel(kind, item);
-        const active = sel.kind === kind && sel.index === index;
-        nodes.push(h(`div.row${active ? '.active' : ''}`, { role: 'button', tabindex: 0, onclick: () => select({ kind, index }) },
-          h('span.row-name', name),
-          isLinked(item) ? h('span.linked', { title: 'Linked to a real device' }, icon('link', 12, 2.2)) : null,
-          h('span.row-sub', sub),
-          h('button.del', { title: 'Remove', 'aria-label': `Remove ${name}`, onclick: (e) => { e.stopPropagation(); remove(kind, index); } }, icon('close', 13, 2.4))));
-      });
+        h('button.add', {
+          title: `Add to ${TITLES[kind].toLowerCase()}`,
+          'aria-label': `Add ${kind}`,
+          onclick: (e) => { e.stopPropagation(); collapsedGroups.delete(kind); add(kind); },
+        }, icon('plus', 14, 2.4))));
+      if (!isCollapsed) {
+        items.forEach((item, index) => {
+          const [name, sub] = rowLabel(kind, item);
+          const active = sel.kind === kind && sel.index === index;
+          nodes.push(h(`div.row${active ? '.active' : ''}`, { role: 'button', tabindex: 0, onclick: () => select({ kind, index }) },
+            h('span.row-name', name),
+            isLinked(item) ? h('span.linked', { title: 'Linked to a real device' }, icon('link', 12, 2.2)) : null,
+            h('span.row-sub', sub),
+            h('button.del', { title: 'Remove', 'aria-label': `Remove ${name}`, onclick: (e) => { e.stopPropagation(); remove(kind, index); } }, icon('close', 13, 2.4))));
+        });
+      }
     }
     const top = sidebar.scrollTop;
     sidebar.replaceChildren(...nodes);
@@ -319,11 +348,17 @@ export async function bootEditor(root) {
     doc.furniture.forEach((f, i) => {
       if (!Array.isArray(f.pos)) return;
       const [w, d] = footprint(f);
+      const isRound = f.type === 'roundDiningSet';
       kids.push(sv('g', {
         class: `p-furn${isSel('furniture', i) ? ' sel' : ''}`, 'data-kind': 'furniture', 'data-index': i,
         transform: `translate(${f.pos[0]} ${f.pos[1]}) rotate(${-(f.rot || 0)})`,
       },
-        sv('rect', { x: -w / 2, y: -d / 2, width: w, height: d, rx: 0.06 }),
+        isRound
+          ? sv('circle', { cx: 0, cy: 0, r: w / 2 })
+          : sv('rect', { x: -w / 2, y: -d / 2, width: w, height: d, rx: 0.06 }),
+        isRound
+          ? sv('circle', { cx: 0, cy: 0, r: (f.width || 1.25) / 2, fill: 'none', stroke: 'currentColor', 'stroke-width': 0.025, opacity: 0.65 })
+          : null,
         // a tick marks the front of the piece
         sv('path', { d: `M${-w / 4} ${d / 2}H${w / 4}`, class: 'front' })));
     });
@@ -352,6 +387,17 @@ export async function bootEditor(root) {
       if (l.type === 'strip') {
         const len = l.length || 1;
         g.append(sv('rect', { x: -len / 2, y: -0.07, width: len, height: 0.14, rx: 0.07 }));
+      } else if (l.type === 'fan') {
+        g.append(
+          sv('circle', { r: 0.48, class: 'halo' }),
+          sv('path', { d: 'M-0.42 0H0.42M0 -0.42V0.42', stroke: 'currentColor', 'stroke-width': 0.05, 'stroke-linecap': 'round' }),
+          sv('circle', { cx: 0, cy: -0.22, r: 0.12 })
+        );
+      } else if (l.type === 'fanBulb') {
+        g.append(
+          sv('circle', { r: 0.17, class: 'halo' }),
+          sv('circle', { r: 0.12 })
+        );
       } else {
         g.append(sv('circle', { r: 0.34, class: 'halo' }), sv('circle', { r: l.type === 'table' ? 0.13 : 0.19 }));
       }
@@ -361,6 +407,21 @@ export async function bootEditor(root) {
     if (sel.kind === 'room' && doc.rooms[sel.index]) {
       const [x, z, w, d] = doc.rooms[sel.index].rect;
       kids.push(sv('circle', { cx: x + w, cy: z + d, r: 0.16, class: 'p-handle', 'data-kind': 'resize', 'data-index': sel.index }));
+    } else if (sel.kind === 'furniture' && doc.furniture[sel.index]) {
+      const f = doc.furniture[sel.index];
+      if (Array.isArray(f.pos)) {
+        const [w, d] = footprint(f);
+        const rad = -(f.rot || 0) * Math.PI / 180;
+        const hx = f.pos[0] + (w / 2) * Math.cos(rad) - (d / 2) * Math.sin(rad);
+        const hz = f.pos[1] + (w / 2) * Math.sin(rad) + (d / 2) * Math.cos(rad);
+        kids.push(sv('circle', { cx: hx, cy: hz, r: 0.15, class: 'p-handle', 'data-kind': 'resize-furn', 'data-index': sel.index }));
+      }
+    } else if (sel.kind === 'opening' && doc.openings[sel.index]) {
+      const o = doc.openings[sel.index];
+      kids.push(
+        sv('circle', { cx: o.from[0], cy: o.from[1], r: 0.15, class: 'p-handle', 'data-kind': 'resize-open-from', 'data-index': sel.index }),
+        sv('circle', { cx: o.to[0], cy: o.to[1], r: 0.15, class: 'p-handle', 'data-kind': 'resize-open-to', 'data-index': sel.index })
+      );
     }
     plan.replaceChildren(...kids);
   }
@@ -402,6 +463,16 @@ export async function bootEditor(root) {
       drag = { kind, index, start, rect: [...doc.rooms[index].rect] };
       return;
     }
+    if (kind === 'resize-furn') {
+      const f = doc.furniture[index];
+      drag = { kind, index, start, furn: structuredClone(f), moved: false };
+      return;
+    }
+    if (kind === 'resize-open-from' || kind === 'resize-open-to') {
+      const o = doc.openings[index];
+      drag = { kind, index, start, from: [...o.from], to: [...o.to], moved: false };
+      return;
+    }
     if (!isSel(kind, index)) select({ kind, index });
     const item = doc[KEYS[kind]][index];
     drag = { kind, index, start, moved: false };
@@ -421,6 +492,11 @@ export async function bootEditor(root) {
       drag.to = [...item.to];
     } else {
       drag.pos = [...item.pos];
+      if (kind === 'light' && item.type === 'fan') {
+        drag.riders = doc.lights
+          .filter((l) => l !== item && l.room === item.room && l.type === 'fanBulb')
+          .map((o) => ({ o, pos: [...o.pos] }));
+      }
     }
   });
 
@@ -431,11 +507,43 @@ export async function bootEditor(root) {
     const dz = round(pz - drag.start[1]);
     if (!drag.moved && !dx && !dz) return;
     if (!drag.moved) { drag.moved = true; snapshot(); }
-    const item = drag.kind === 'resize' ? doc.rooms[drag.index] : doc[KEYS[drag.kind]][drag.index];
+    const item = drag.kind === 'resize' ? doc.rooms[drag.index]
+      : drag.kind === 'resize-furn' ? doc.furniture[drag.index]
+        : (drag.kind === 'resize-open-from' || drag.kind === 'resize-open-to') ? doc.openings[drag.index]
+          : doc[KEYS[drag.kind]][drag.index];
 
     if (drag.kind === 'resize') {
       item.rect[2] = fix(Math.max(1, round(drag.rect[2] + px - drag.start[0], 0.1)));
       item.rect[3] = fix(Math.max(1, round(drag.rect[3] + pz - drag.start[1], 0.1)));
+    } else if (drag.kind === 'resize-furn') {
+      const rad = -(item.rot || 0) * Math.PI / 180;
+      const vx = px - item.pos[0];
+      const vz = pz - item.pos[1];
+      const localX = Math.abs(vx * Math.cos(-rad) - vz * Math.sin(-rad));
+      const localZ = Math.abs(vx * Math.sin(-rad) + vz * Math.cos(-rad));
+      const newW = fix(clamp(round(localX * 2, 0.05), 0.35, 8));
+      const newD = fix(clamp(round(localZ * 2, 0.05), 0.35, 8));
+      if (item.type === 'rug') {
+        item.size = [newW, newD];
+      } else if (item.type === 'chimney') {
+        item.width = newW;
+        item.depth = newD;
+      } else if (item.type === 'roundDiningSet') {
+        item.width = fix(clamp(newW - 0.55, 0.7, 3.0));
+      } else {
+        item.width = newW;
+      }
+    } else if (drag.kind === 'resize-open-from' || drag.kind === 'resize-open-to') {
+      const alongX = Math.abs(drag.from[1] - drag.to[1]) < 1e-4;
+      const endKey = drag.kind === 'resize-open-from' ? 'from' : 'to';
+      const otherKey = endKey === 'from' ? 'to' : 'from';
+      if (alongX) {
+        const nx = fix(round(px, 0.05));
+        if (Math.abs(nx - item[otherKey][0]) >= 0.2) item[endKey] = [nx, drag.from[1]];
+      } else {
+        const nz = fix(round(pz, 0.05));
+        if (Math.abs(nz - item[otherKey][1]) >= 0.2) item[endKey] = [drag.from[0], nz];
+      }
     } else if (drag.kind === 'room') {
       const mx = round(px - drag.start[0], 0.1);
       const mz = round(pz - drag.start[1], 0.1);
@@ -456,6 +564,12 @@ export async function bootEditor(root) {
       if (drag.kind === 'light') {
         const room = roomAt(item.pos);
         if (room) item.room = room.id;
+        if (drag.riders) {
+          for (const r of drag.riders) {
+            r.o.pos = [fix(r.pos[0] + dx), fix(r.pos[1] + dz)];
+            if (room) r.o.room = room.id;
+          }
+        }
       }
     }
     touch();
@@ -523,6 +637,7 @@ export async function bootEditor(root) {
       section('How it works',
         h('p.note', 'Pick anything on the plan or in the list to edit it. “Save & apply” writes the plan to disk and reloads the menu bar panel. Coordinates are metres: x grows to the right (east), z grows downwards (south).')));
     } else if (kind === 'connections') {
+      nodes.push(h('button.back-link', { onclick: () => select({ kind: 'home' }) }, icon('back', 14, 2.2), 'Back to 2D Floor Plan'));
       head('Connections', 'Where your real lamps and air conditioners live');
       nodes.push(...links.overview());
     } else if (kind === 'service') {
@@ -563,6 +678,35 @@ export async function bootEditor(root) {
           bind('White temperature', h('input', { type: 'checkbox' }), { ...cap('temp'), event: 'change' }),
           bind('Colour', h('input', { type: 'checkbox' }), { ...cap('color'), event: 'change' })),
         h('p.note', 'Leave all three off for a lamp on a plain smart plug: it is then a simple on/off switch.')),
+      (item.type === 'fan' || item.type === 'fanBulb') ? (() => {
+        const fanItem = item.type === 'fan' ? item : doc.lights.find((l) => l.room === item.room && l.type === 'fan');
+        const fanBulbs = doc.lights.filter((l) => l.room === item.room && (l.type === 'fan' || l.type === 'fanBulb'));
+        const snapBulbs = () => {
+          if (!fanItem) return;
+          snapshot('snap-fan-bulbs');
+          const [cx, cz] = fanItem.pos;
+          const extras = doc.lights.filter((l) => l !== fanItem && l.room === fanItem.room && l.type === 'fanBulb');
+          const offsets = [[-0.19, 0.11], [0.19, 0.11]];
+          extras.slice(0, 2).forEach((b, idx) => {
+            b.pos = [fix(cx + offsets[idx][0]), fix(cz + offsets[idx][1])];
+          });
+          touch();
+          toast('Snapped 3 bulbs to ceiling fan sockets');
+        };
+        return section('Ceiling Fan · 3 Bulb Sockets',
+          h('p.note', 'Socket 1 is on the "fan" fixture; Sockets 2 & 3 use "fanBulb" fixtures in the same room so all 3 smart bulbs can be linked and controlled individually.'),
+          h('div.devices-list', fanBulbs.map((b, idx) => {
+            const bIdx = doc.lights.indexOf(b);
+            return h('div.device',
+              h(`span.dot${isLinked(b) ? '.on' : ''}`),
+              h('div', h('b', `Bulb ${idx + 1}: ${b.name}`), h('span', `${b.type} · [${b.pos[0]}, ${b.pos[1]}]`)),
+              b === item
+                ? h('span.pill.on', 'Selected')
+                : h('button.btn', { onclick: () => select({ kind: 'light', index: bIdx }) }, 'Select'));
+          })),
+          fanItem ? h('button.btn', { onclick: snapBulbs }, 'Snap 3 bulbs to fan center') : null
+        );
+      })() : null,
       links.deviceSection(item, 'light', linkHooks));
     } else if (kind === 'ac') {
       head(item.name || item.id, `id: ${item.id}`);
@@ -785,7 +929,7 @@ export async function bootEditor(root) {
   }
 
   async function exportPlan() {
-    if (!isNative) { download(); return; }
+    if (!isNative || isWebBackend) { download(); return; }
     try {
       const r = await call('exportPlan', { config: doc });
       if (r.ok) toast('Plan exported');
@@ -808,7 +952,7 @@ export async function bootEditor(root) {
       touch();
       toast('Plan imported — review it and press “Save & apply”');
     };
-    if (isNative) {
+    if (isNative && !isWebBackend) {
       try {
         const r = await call('importPlan');
         if (r.config) load(r.config);
@@ -835,7 +979,7 @@ export async function bootEditor(root) {
     } else if ((ev.key === 'Backspace' || ev.key === 'Delete') && !typing && sel.index != null) {
       ev.preventDefault();
       remove(sel.kind, sel.index);
-    } else if (ev.key.startsWith('Arrow') && !typing && sel.index != null) {
+    } else if (ev.key?.startsWith('Arrow') && !typing && sel.index != null) {
       const item = doc[KEYS[sel.kind]][sel.index];
       const target = item.pos || item.rect;
       if (!target) return;

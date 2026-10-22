@@ -1,13 +1,14 @@
 // The editor's "Connections": the smart home platforms House Control can link the plan's
-// lamps and ACs to (Smart Life, Home Assistant, Philips Hue, Apple Home), the screens that
-// connect each one, and the pickers that link a lamp or an AC to one of their devices.
+// lamps and ACs to (Govee LAN + Cloud, Smart Life, Home Assistant, Philips Hue, Apple Home),
+// the screens that connect each one, and the pickers that link a lamp or an AC to one of their devices.
 import { h } from '../ui/dom.js';
 import { icon } from '../ui/icons.js';
 import { isNative, call } from '../bridge.js';
 import { SERVICES, linkOf } from '../config.js';
 
-const ORDER = ['smartlife', 'homeassistant', 'hue', 'homekit'];
+const ORDER = ['govee', 'smartlife', 'homeassistant', 'hue', 'homekit'];
 const LOOK = {
+  govee: { icon: 'sparkles', tint: '#00d4aa', blurb: 'Local LAN (instant UDP for your Rope Light) + Govee Cloud API (for all your other Govee lights)' },
   smartlife: { icon: 'plug', tint: '#ff7a3d', blurb: 'Tuya, Smart Life and the many brands built on them' },
   homeassistant: { icon: 'homeassistant', tint: '#18bcf2', blurb: 'Everything it runs: Zigbee, Matter, Nest, Xiaomi, Sonoff…' },
   hue: { icon: 'bulb', tint: '#c38bff', blurb: 'A Hue Bridge on this network. No account needed' },
@@ -76,9 +77,9 @@ export function createConnections({ rerender, toast, usedBy, onOpen }) {
       return info.connected ? `${info.count} devices from ${info.from || 'your iPhone'}` : 'Set up on your iPhone';
     }
     if (!info.connected) return 'Not connected';
-    const count = devicesOf(id).length;
-    const name = id === 'homeassistant' ? info.name : id === 'hue' ? info.name : id === 'smartlife' ? info.account : '';
-    return [name, state.devices ? `${count} device${count === 1 ? '' : 's'}` : null].filter(Boolean).join(' · ') || 'Connected';
+    const count = devicesOf(id).length || info.count || 0;
+    const name = id === 'homeassistant' ? info.name : id === 'hue' ? info.name : id === 'smartlife' ? info.account : id === 'govee' ? (info.name || 'Hybrid') : '';
+    return [name, (state.devices || id === 'govee') ? `${count} device${count === 1 ? '' : 's'}` : null].filter(Boolean).join(' · ') || 'Connected';
   }
 
   function overview() {
@@ -89,8 +90,8 @@ export function createConnections({ rerender, toast, usedBy, onOpen }) {
         h('div.svc-text', h('b', SERVICES[id].name), h('span', LOOK[id].blurb)),
         h(`span.svc-status${connected(id) ? '.on' : ''}`, connected(id) ? icon('ok', 13, 2.4) : null, statusText(id)),
         icon('next', 16)))),
-      h('p.note', 'Lamps and ACs stay simulated until you link them: pick one on the plan, then choose its device under “Real device”. One home can mix all four.'),
-      isNative ? null : h('p.note.bad', 'Connecting is only available inside the macOS app (this is the browser preview).'),
+      h('p.note', 'Lamps and ACs stay simulated until you link them: pick one on the plan, then choose its device under “Real device”. One home can mix all platforms.'),
+      isNative ? null : h('p.note.bad', 'Connecting is only available when the House Control server is running.'),
     ];
   }
 
@@ -143,6 +144,146 @@ export function createConnections({ rerender, toast, usedBy, onOpen }) {
     rerender();
   }
 
+  /* ---------- Govee Hybrid (LAN + Cloud API) ---------- */
+
+  const goveeManual = { ip: '', name: '', sku: '', busy: false };
+  const goveeCloud = { apiKey: '', busy: false, error: null };
+
+  function goveeLan() {
+    if (!state.devices && !state.loading && isNative) setTimeout(() => load(), 0);
+    const list = devicesOf('govee');
+    const info = state.info.govee || {};
+    const used = usedBy();
+
+    const doScan = async () => {
+      if (!isNative || state.scanning.govee) return;
+      state.scanning.govee = true;
+      rerender();
+      try {
+        const r = await call('govee.scan');
+        if (r.info) state.info = r.info;
+        await load({ quiet: true });
+        toast(`Synced — ${devicesOf('govee').length} Govee light(s) ready`);
+      } catch (e) {
+        toast(e.message, true);
+      }
+      state.scanning.govee = false;
+      rerender();
+    };
+
+    const keyInput = h('input', {
+      type: 'password',
+      autocomplete: 'off',
+      spellcheck: 'false',
+      placeholder: info.hasApiKey ? `Saved (${info.apiKeyPreview}) — paste new key to replace` : 'Paste your Govee API Key here',
+      value: goveeCloud.apiKey,
+    });
+
+    const saveKeyBtn = h('button.btn.primary.wide', {
+      disabled: !isNative || goveeCloud.busy || !goveeCloud.apiKey.trim(),
+      onclick: async () => {
+        goveeCloud.busy = true;
+        goveeCloud.error = null;
+        rerender();
+        try {
+          const r = await call('govee.saveKey', { apiKey: goveeCloud.apiKey });
+          if (r.info) state.info = r.info;
+          goveeCloud.apiKey = '';
+          await load({ quiet: true });
+          toast(`Connected Govee Cloud — ${devicesOf('govee').length} total light(s) loaded!`);
+        } catch (e) {
+          goveeCloud.error = e.message;
+          toast(e.message, true);
+        }
+        goveeCloud.busy = false;
+        rerender();
+      },
+    }, goveeCloud.busy ? 'Fetching lights from Govee Cloud…' : 'Save API Key & Fetch All Lights');
+
+    keyInput.addEventListener('input', () => {
+      goveeCloud.apiKey = keyInput.value;
+      saveKeyBtn.disabled = !isNative || goveeCloud.busy || !keyInput.value.trim();
+    });
+
+    const ipInput = h('input', { type: 'text', spellcheck: 'false', placeholder: 'e.g. 192.168.1.50', value: goveeManual.ip });
+    const nameInput = h('input', { type: 'text', spellcheck: 'false', placeholder: 'e.g. Rope Light', value: goveeManual.name });
+    const skuInput = h('input', { type: 'text', spellcheck: 'false', placeholder: 'e.g. H61A0 (optional)', value: goveeManual.sku });
+
+    const addBtn = h('button.btn.wide', {
+      disabled: !isNative || goveeManual.busy || !goveeManual.ip.trim(),
+      onclick: async () => {
+        goveeManual.busy = true;
+        rerender();
+        try {
+          const r = await call('govee.addManual', { ip: goveeManual.ip, name: goveeManual.name, sku: goveeManual.sku });
+          if (r.info) state.info = r.info;
+          goveeManual.ip = '';
+          goveeManual.name = '';
+          goveeManual.sku = '';
+          await load({ quiet: true });
+          toast(`Added ${r.device?.name || 'Govee light'}`);
+        } catch (e) {
+          toast(e.message, true);
+        }
+        goveeManual.busy = false;
+        rerender();
+      },
+    }, goveeManual.busy ? 'Adding…' : 'Add LAN light by IP');
+
+    ipInput.addEventListener('input', () => { goveeManual.ip = ipInput.value; addBtn.disabled = !isNative || goveeManual.busy || !ipInput.value.trim(); });
+    nameInput.addEventListener('input', () => { goveeManual.name = nameInput.value; });
+    skuInput.addEventListener('input', () => { goveeManual.sku = skuInput.value; });
+
+    return [
+      section('1. Govee Cloud API (For Lights Without LAN Toggle)',
+        info.hasApiKey
+          ? h('div.device', h('span.dot.on'), h('div', h('b', 'Govee Cloud API Connected'), h('span', `Key ${info.apiKeyPreview} · pulls all Wi-Fi lights in your account`)))
+          : null,
+        h('ol.steps',
+          h('li', 'In the Govee Home app on your phone, tap the Profile icon (bottom right) → ⚙ Settings → "Apply for API Key".'),
+          h('li', 'Type "Home automation" as the reason and submit — Govee emails your key in ~10 seconds.'),
+          h('li', 'Paste the API key below to import all your Wi-Fi Govee lights at once.')),
+        h('label.field', h('span', 'Govee API Key'), keyInput),
+        saveKeyBtn,
+        goveeCloud.error ? h('p.note.bad', goveeCloud.error) : null),
+
+      section('2. Local LAN Discovery (For Your Rope Light & LAN Models)',
+        h('p.note', 'Any light with "LAN Control" enabled is controlled directly over UDP (zero cloud delay). Lights with both LAN + Cloud automatically use fast Local LAN!'),
+        h('button.btn.wide', { onclick: doScan, disabled: !isNative || state.scanning.govee },
+          state.scanning.govee ? [icon('spinner', 14), 'Scanning LAN & syncing Cloud…'] : [icon('radar', 14), 'Scan LAN & Refresh All Govee Lights'])),
+
+      section(`Your Govee Lights (${list.length})`,
+        list.length
+          ? list.map((d) => h('div.device',
+            h(`span.dot${d.online ? '.on' : ''}`, { title: d.online ? 'Online' : 'Offline' }),
+            h('div', h('b', d.name), h('span', `${d.detail}`)),
+            used.get(`govee|${d.id}`) ? h('span.pill.on', used.get(`govee|${d.id}`)) : null,
+            h('button.btn', {
+              title: 'Toggle light to test',
+              onclick: async () => {
+                try { await call('govee.test', { id: d.id }); toast(`Toggled ${d.name}`); } catch (e) { toast(e.message, true); }
+              },
+            }, 'Test'),
+            h('button.btn', {
+              title: 'Remove',
+              onclick: async () => {
+                await call('govee.remove', { id: d.id });
+                await refreshInfo();
+                await load({ quiet: true });
+              },
+            }, icon('close', 12, 2.2))))
+          : h('p.note', 'No Govee lights added yet. Paste your Govee API Key above or scan your local network.')),
+
+      h('details.advanced', h('summary', 'Advanced: Add a LAN light manually by IP address'),
+        h('p.note', 'If your router blocks UDP multicast discovery for your Rope Light, enter its local IPv4 address from your router or Govee app Device Settings.'),
+        h('label.field', h('span', 'Device IP address'), ipInput),
+        h('div.fields',
+          h('label.field', h('span', 'Friendly name'), nameInput),
+          h('label.field', h('span', 'Model / SKU'), skuInput)),
+        addBtn),
+    ];
+  }
+
   /* ---------- Home Assistant ---------- */
 
   const ha = { url: '', token: '', error: null, busy: false };
@@ -189,7 +330,7 @@ export function createConnections({ rerender, toast, usedBy, onOpen }) {
           h('li', 'Under “Long-lived access tokens” press Create token, name it “House Control”, copy it here.')),
         button,
         ha.error ? h('p.note.bad', ha.error) : null,
-        h('p.note', 'The token stays on this Mac (and goes to the iPhones you paired, over their encrypted link). Lights, switches, climate devices and temperature sensors appear here.')),
+        h('p.note', 'The token stays on this computer. Lights, switches, climate devices and temperature sensors appear here.')),
     ];
   }
 
@@ -245,7 +386,7 @@ export function createConnections({ rerender, toast, usedBy, onOpen }) {
         h('div.fields',
           state.pairing.error ? h('button.btn', { onclick: () => pairHue(state.pairing) }, 'Try again') : null,
           h('button.btn', { onclick: () => { stopPairing(); rerender(); } }, 'Cancel')),
-        h('p.note', 'The big button on top of the Hue Bridge lets one app in for 30 seconds. House Control keeps the key it gets, on this Mac.'))];
+        h('p.note', 'The big button on top of the Hue Bridge lets one app in for 30 seconds.'))];
     }
     if (!state.found.hue && !state.scanning.hue) setTimeout(() => scan('hue'), 0);
     const found = state.found.hue || [];
@@ -284,13 +425,14 @@ export function createConnections({ rerender, toast, usedBy, onOpen }) {
         h('li', 'Pair your iPhone with this Mac: right-click the menu bar icon → Pair iPhone….'),
         h('li', 'On the iPhone: House Control → Settings → Apple Home → Connect, and allow access to your Home data.'),
         h('li', 'Its lamps, air conditioners and thermometers appear here. Link them like any other device.')),
-      h('p.note', 'Apple lets only iPhone, iPad and App Store apps use HomeKit, so the iPhone app switches these devices. On the Mac they show what you set, but stay simulated.')));
+      h('p.note', 'Apple lets only iPhone, iPad and App Store apps use HomeKit, so the iPhone app switches these devices.')));
     return nodes;
   }
 
   /* ---------- detail screen ---------- */
 
   function detail(id, smartLifePanel) {
+    if (id === 'govee') return goveeLan();
     if (id === 'smartlife') return smartLifePanel();
     if (id === 'homeassistant') return homeAssistant();
     if (id === 'hue') return hue();
@@ -332,8 +474,8 @@ export function createConnections({ rerender, toast, usedBy, onOpen }) {
     const current = link ? `${link.service}|${link.id}` : '';
     if (!anyConnected()) {
       return section('Real device',
-        h('p.note', 'Simulated. Connect Smart Life, Home Assistant, Philips Hue or Apple Home to control the real one.'),
-        h('button.btn.wide', { onclick: () => onOpen(null) }, icon('link', 14), 'Open Connections'));
+        h('p.note', 'Simulated. Connect Govee, Smart Life, Home Assistant, Philips Hue or Apple Home to control the real one.'),
+        h('button.btn.wide', { onclick: () => onOpen('govee') }, icon('link', 14), 'Open Govee Connections'));
     }
     if (!state.devices && !state.loading) setTimeout(() => load({ quiet: true }), 0);
     const select = picker(kind, current);
@@ -359,14 +501,15 @@ export function createConnections({ rerender, toast, usedBy, onOpen }) {
       changed(note);
     });
     const device = find(current);
-    const info = device ? [SERVICES[device.service].name, device.detail, device.room].filter(Boolean).join(' · ')
+    const info = device ? [SERVICES[device.service]?.name, device.detail, device.room].filter(Boolean).join(' · ')
       : current && state.devices ? 'This device was not found in its platform right now.'
         : state.loading ? 'Loading your devices…' : '';
     const offline = device && !device.online;
     return section('Real device',
       h('label.field', h('span', 'Device'), select),
       info ? h(`p.note${offline ? '.bad' : ''}`, offline ? `${info} · offline` : info) : null,
-      device?.service === 'homekit' && state.info.homekit?.remote ? h('p.note', 'Switched from your iPhone; simulated on this Mac.') : null,
+      h('button.btn.link', { onclick: () => onOpen('govee') }, icon('radar', 13), 'Manage Govee (LAN + Cloud) devices'),
+      device?.service === 'homekit' && state.info.homekit?.remote ? h('p.note', 'Switched from your iPhone; simulated on this computer.') : null,
       Object.keys(state.errors).length ? h('p.note.bad', Object.entries(state.errors).map(([s, e]) => `${SERVICES[s]?.name || s}: ${e}`).join(' · ')) : null);
   }
 

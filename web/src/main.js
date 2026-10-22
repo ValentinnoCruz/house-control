@@ -5,7 +5,7 @@ import { createPanel } from './ui/panel.js';
 import { createAgent } from './agent/tools.js';
 import { h, openMenu } from './ui/dom.js';
 import { icon } from './ui/icons.js';
-import { isNative, isPhone, post, incoming, haptic } from './bridge.js';
+import { isNative, isWebBackend, isPhone, post, incoming, haptic } from './bridge.js';
 
 const DEMO_PLANS = [
   { id: 'home', name: 'Demo · Apartment' },
@@ -14,7 +14,7 @@ const DEMO_PLANS = [
 const STAGE_INSETS = [62, 50]; // header above, panel overlap below
 
 const app = document.getElementById('app');
-if (isNative) document.documentElement.classList.add('native');
+if (isNative && !isWebBackend) document.documentElement.classList.add('native');
 if (isPhone) document.documentElement.classList.add('ios');
 
 // ?safeTop=62&safeBottom=34 stands in for a phone's safe areas when its layout is looked at in a browser.
@@ -157,15 +157,14 @@ async function boot() {
         action: () => post('selectPlan', { plan: 'custom' }),
       });
     }
-    if (isNative) {
-      items.push('-',
-        { label: 'Edit home…', action: () => post('openEditor') },
-        { label: 'AI access…', action: () => post('openAgent') },
-        { label: 'Load floor plan…', action: () => post('loadPlan') },
-        { label: 'Reveal plan file', action: () => post('revealPlan') },
-        '-',
-        { label: 'Quit House Control', action: () => post('quit') });
-    }
+    items.push('-',
+      { label: 'Edit Floor Plan (2D Editor)…', action: () => { location.href = `${location.pathname}?mode=editor`; } },
+      { label: 'Govee LAN + Cloud Connections…', action: () => { location.href = `${location.pathname}?mode=editor&section=service:govee`; } },
+      { label: 'Show Dynamic Island View…', action: () => { location.href = `${location.pathname}?mode=island&expanded=1`; } },
+      { label: 'iPhone / Mobile View…', action: () => { location.href = `${location.pathname}?platform=ios`; } },
+      { label: 'AI Access…', action: () => { location.href = `${location.pathname}?mode=agent`; } },
+      { label: 'Reveal Plan File in Explorer', action: () => post('revealPlan') },
+      { label: 'Reveal Device Log in Explorer', action: () => post('revealLog') });
     openMenu(panel.anchorMenu, anchor, items);
   }
 
@@ -173,7 +172,7 @@ async function boot() {
   if (store.acCfg.has(opened)) panel.openSheet({ kind: 'ac', id: opened });
   else if (store.lightCfg.has(opened)) panel.openSheet({ kind: 'light', id: opened });
 
-  if (!isNative) show();
+  if (!isNative || isWebBackend) show();
   post('ready', { summary: store.summary() });
   window.__house = { store, world, panel, config }; // handy in the dev console
 }

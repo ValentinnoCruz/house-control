@@ -45,7 +45,7 @@ function spot(intensity, y) {
   return light;
 }
 
-function point(intensity, y, { shadow = true, distance = 0, x = 0, z = 0 } = {}) {
+function point(intensity, y, { shadow = false, distance = 0, x = 0, z = 0 } = {}) {
   const light = new THREE.PointLight(0xffffff, 0, distance, 2);
   light.position.set(x, y, z);
   if (shadow) {
@@ -70,6 +70,76 @@ const fixtures = {
       glow: [at(cyl(0.27, 0.27, 0.055, glowMaterial(), 40), 0, y, 0)],
       lights: [spot(cfg.intensity ?? 20, y - 0.02)],
       hit: [0.75, 0.5, 0.75, y],
+    };
+  },
+
+  fan(cfg, H) {
+    const y = cfg.y ?? H - 0.32;
+    const darkMetal = mat(DARK, { rough: 0.4, metal: 0.55 });
+    const bladeMat = mat('#4a382b', { rough: 0.65 });
+    const parts = [
+      // Ceiling canopy + downrod + motor housing + central light fitter hub
+      at(cyl(0.075, 0.055, 0.05, darkMetal, 16), 0, H - 0.05, 0),
+      at(cyl(0.014, 0.014, Math.max(0.08, H - y - 0.06), darkMetal, 10), 0, y + 0.06, 0),
+      at(cyl(0.16, 0.16, 0.08, darkMetal, 28), 0, y + 0.02, 0),
+      at(cyl(0.085, 0.07, 0.045, darkMetal, 20), 0, y - 0.02, 0),
+    ];
+
+    // 5 pitched wooden fan blades
+    const bladeCount = 5;
+    for (let i = 0; i < bladeCount; i++) {
+      const angle = (i * Math.PI * 2) / bladeCount;
+      const bladeHolder = new THREE.Group();
+      bladeHolder.position.set(0, y + 0.05, 0);
+      bladeHolder.rotation.y = angle;
+      const arm = at(box(0.12, 0.012, 0.035, darkMetal, { r: 0.004 }), 0.18, -0.006, 0);
+      const blade = at(box(0.46, 0.01, 0.115, bladeMat, { r: 0.004 }), 0.42, -0.005, 0);
+      blade.rotation.x = 0.16;
+      bladeHolder.add(arm, blade);
+      parts.push(bladeHolder);
+    }
+
+    // 3 socket arms & cups at 120° intervals:
+    // Socket 1: [0, -0.22], Socket 2: [-0.19, +0.11], Socket 3: [+0.19, +0.11]
+    const sockets = [
+      [0, -0.22],
+      [-0.19, 0.11],
+      [0.19, 0.11],
+    ];
+    for (const [sx, sz] of sockets) {
+      const angle = Math.atan2(sz, sx);
+      const armGroup = new THREE.Group();
+      armGroup.position.set(0, y - 0.015, 0);
+      armGroup.rotation.y = -angle;
+      armGroup.add(at(box(0.22, 0.014, 0.018, darkMetal, { r: 0.004 }), 0.11, 0, 0));
+      parts.push(armGroup);
+
+      const cup = at(cyl(0.036, 0.028, 0.05, darkMetal, 16), sx, y - 0.045, sz);
+      parts.push(cup);
+    }
+
+    // Bulb #1 belongs to the 'fan' fixture itself at Socket 1 (0, -0.22)
+    const bulb1 = new THREE.Mesh(new THREE.SphereGeometry(0.066, 20, 14), glowMaterial());
+    bulb1.position.set(0, y - 0.075, -0.22);
+
+    return {
+      parts,
+      glow: [bulb1],
+      lights: [spot(cfg.intensity ?? 9, y - 0.09)],
+      hit: [0.32, 0.36, 0.32, y - 0.05, 0, -0.22],
+    };
+  },
+
+  fanBulb(cfg, H) {
+    // Individual smart bulb #2 or #3 attached to a ceiling fan's socket
+    const y = cfg.y ?? H - 0.32;
+    const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.066, 20, 14), glowMaterial());
+    bulb.position.set(0, y - 0.075, 0);
+    return {
+      parts: [],
+      glow: [bulb],
+      lights: [point(cfg.intensity ?? 6.5, y - 0.1, { shadow: false, distance: 7 })],
+      hit: [0.32, 0.36, 0.32, y - 0.05, 0, 0],
     };
   },
 
@@ -173,9 +243,11 @@ export class LightUnit {
       if (l.target) this.group.add(l.target);
     }
 
-    const [hw, hh, hd, hy] = f.hit;
+    const [hw, hh, hd, hy, hx = 0, hz = 0] = f.hit;
+    this.hitX = hx;
+    this.hitZ = hz;
     this.hit = new THREE.Mesh(new THREE.BoxGeometry(hw, hh, hd), new THREE.MeshBasicMaterial());
-    this.hit.position.y = hy;
+    this.hit.position.set(hx, hy, hz);
     this.hit.visible = false;
     this.hit.userData = { kind: 'light', id: cfg.id };
     this.group.add(this.hit);
@@ -193,7 +265,7 @@ export class LightUnit {
 
   // Anchor used for tooltips.
   anchor(out) {
-    return out.set(0, this.pivotY + 0.25, 0).applyMatrix4(this.group.matrixWorld);
+    return out.set(this.hitX || 0, this.pivotY + 0.25, this.hitZ || 0).applyMatrix4(this.group.matrixWorld);
   }
 
   apply(state, { instant = false, delay = 0 } = {}) {

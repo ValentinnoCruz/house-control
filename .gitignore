@@ -34,3 +34,4 @@ ios/Config/Local.xcconfig
 ios/build/
 core/.build/
 sync.json
+.house-data/

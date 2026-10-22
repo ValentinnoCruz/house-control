@@ -265,3 +265,19 @@ html.mode-editor, html.mode-editor body { user-select: none; }
   .press-button span { animation: none; box-shadow: 0 0 0 3px rgba(60, 140, 255, 0.55); }
   .note.busy .icon { animation-duration: 2.4s; }
 }
+
+
+.group-bar {
+  padding: 6px 12px 0;
+  display: flex;
+  justify-content: flex-end;
+}
+.group.collapsible {
+  cursor: pointer;
+  user-select: none;
+  border-radius: 6px;
+  transition: background 150ms;
+}
+.group.collapsible:hover {
+  background: rgba(255, 255, 255, 0.05);
+}

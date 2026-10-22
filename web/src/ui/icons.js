@@ -10,7 +10,7 @@ import {
 
 const ICONS = {
   power: Power, sun: Sun, sofa: Sofa, film: Film, moon: Moon, door: DoorOpen,
-  ceiling: LampCeiling, pendant: Lamp, spots: Lightbulb, floor: LampFloor, table: LampDesk, strip: Sparkles,
+  ceiling: LampCeiling, fanBulb: Lightbulb, pendant: Lamp, spots: Lightbulb, floor: LampFloor, table: LampDesk, strip: Sparkles,
   cool: Snowflake, heat: Flame, dry: Droplets, fan: Fan, auto: RefreshCw, wind: Wind, leaf: Leaf,
   down: ChevronDown, back: ChevronLeft, plus: Plus, minus: Minus, thermo: Thermometer,
   sliders: SlidersHorizontal, check: Check, home: House, settings: Settings2, ac: AirVent,

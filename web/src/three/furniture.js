@@ -27,25 +27,55 @@ function legs(w, d, h, material, inset = 0.06, r = 0.022) {
   return out;
 }
 
-function seating(width, depth, color, cushions) {
+function seating(width, depth, color, cushions, { leftArm = true, rightArm = true } = {}) {
   const fabric = mat(color, { rough: 1 });
   const dark = mat(darker(color, 0.82), { rough: 1 });
   const arm = 0.2;
-  const inner = width - arm * 2;
+  const leftInset = leftArm ? arm : 0;
+  const rightInset = rightArm ? arm : 0;
+  const inner = width - leftInset - rightInset;
+  const xOffset = (leftInset - rightInset) / 2;
   const parts = [
     ...legs(width, depth, 0.1, mat(BLACK, { rough: 0.5 }), 0.08),
     at(box(width, 0.2, depth, dark, { r: 0.05 }), 0, 0.1, 0),
-    at(box(inner, 0.52, 0.24, dark, { r: 0.09 }), 0, 0.3, -depth / 2 + 0.12),
+    at(box(inner, 0.52, 0.24, dark, { r: 0.09 }), xOffset, 0.3, -depth / 2 + 0.12),
   ];
-  for (const sx of [-1, 1]) parts.push(at(box(arm, 0.36, depth, dark, { r: 0.08 }), sx * (width / 2 - arm / 2), 0.3, 0));
+  if (leftArm) parts.push(at(box(arm, 0.36, depth, dark, { r: 0.08 }), -(width / 2 - arm / 2), 0.3, 0));
+  if (rightArm) parts.push(at(box(arm, 0.36, depth, dark, { r: 0.08 }), +(width / 2 - arm / 2), 0.3, 0));
   const cw = inner / cushions;
+  const startX = -width / 2 + leftInset;
   for (let i = 0; i < cushions; i++) {
-    const x = -inner / 2 + cw * (i + 0.5);
+    const x = startX + cw * (i + 0.5);
     parts.push(at(box(cw - 0.02, 0.17, depth - 0.3, fabric, { r: 0.06 }), x, 0.3, 0.1));
     const back = at(box(cw - 0.04, 0.36, 0.16, fabric, { r: 0.07 }), x, 0.46, -depth / 2 + 0.3);
     back.rotation.x = -0.14;
     parts.push(back);
   }
+  return group(parts);
+}
+
+function chaiseSection(width, depth, color, { leftArm = true, rightArm = true } = {}) {
+  const fabric = mat(color, { rough: 1 });
+  const dark = mat(darker(color, 0.82), { rough: 1 });
+  const arm = 0.2;
+  const armDepth = Math.min(depth, 0.95);
+  const armZ = -depth / 2 + armDepth / 2;
+  const leftInset = leftArm ? arm : 0;
+  const rightInset = rightArm ? arm : 0;
+  const inner = width - leftInset - rightInset;
+  const xOffset = (leftInset - rightInset) / 2;
+  const parts = [
+    ...legs(width, depth, 0.1, mat(BLACK, { rough: 0.5 }), 0.08),
+    at(box(width, 0.2, depth, dark, { r: 0.05 }), 0, 0.1, 0),
+    at(box(inner, 0.52, 0.24, dark, { r: 0.09 }), xOffset, 0.3, -depth / 2 + 0.12),
+    // Long lounge cushion extending to the front of the chaise
+    at(box(inner - 0.02, 0.17, depth - 0.3, fabric, { r: 0.06 }), xOffset, 0.3, 0.1),
+  ];
+  if (leftArm) parts.push(at(box(arm, 0.36, armDepth, dark, { r: 0.08 }), -(width / 2 - arm / 2), 0.3, armZ));
+  if (rightArm) parts.push(at(box(arm, 0.36, armDepth, dark, { r: 0.08 }), +(width / 2 - arm / 2), 0.3, armZ));
+  const back = at(box(inner - 0.04, 0.36, 0.16, fabric, { r: 0.07 }), xOffset, 0.46, -depth / 2 + 0.3);
+  back.rotation.x = -0.14;
+  parts.push(back);
   return group(parts);
 }
 
@@ -79,6 +109,46 @@ const builders = {
     pillow.rotation.set(-0.25, 0.3, 0.1);
     g.add(pillow);
     return g;
+  },
+
+  loveseat({ width = 1.5, color = '#8b93a7' }) {
+    const g = seating(width, 0.95, color, 2, { leftArm: true, rightArm: true });
+    const pillow = at(box(0.34, 0.34, 0.12, mat('#d9b98a', { rough: 1 }), { r: 0.05 }), -width / 2 + 0.4, 0.46, -0.1);
+    pillow.rotation.set(-0.25, 0.3, 0.1);
+    g.add(pillow);
+    return g;
+  },
+
+  loveseatLeft({ width = 1.5, color = '#8b93a7' }) {
+    // Left end of a sectional: has Left armrest, missing Right armrest so it connects flush on its right
+    const g = seating(width, 0.95, color, 2, { leftArm: true, rightArm: false });
+    const pillow = at(box(0.34, 0.34, 0.12, mat('#d9b98a', { rough: 1 }), { r: 0.05 }), -width / 2 + 0.4, 0.46, -0.1);
+    pillow.rotation.set(-0.25, 0.3, 0.1);
+    g.add(pillow);
+    return g;
+  },
+
+  loveseatRight({ width = 1.5, color = '#8b93a7' }) {
+    // Right end of a sectional: missing Left armrest, has Right armrest so it connects flush on its left
+    const g = seating(width, 0.95, color, 2, { leftArm: false, rightArm: true });
+    const pillow = at(box(0.34, 0.34, 0.12, mat('#d9b98a', { rough: 1 }), { r: 0.05 }), width / 2 - 0.4, 0.46, -0.1);
+    pillow.rotation.set(-0.25, -0.3, -0.1);
+    g.add(pillow);
+    return g;
+  },
+
+  chaise({ width = 0.95, color = '#8b93a7' }) {
+    return chaiseSection(width, 1.65, color, { leftArm: true, rightArm: true });
+  },
+
+  chaiseLeft({ width = 0.95, color = '#8b93a7' }) {
+    // Left chaise: has Left armrest, missing Right armrest to connect flush to loveseatRight
+    return chaiseSection(width, 1.65, color, { leftArm: true, rightArm: false });
+  },
+
+  chaiseRight({ width = 0.95, color = '#8b93a7' }) {
+    // Right chaise: missing Left armrest, has Right armrest to connect flush to loveseatLeft
+    return chaiseSection(width, 1.65, color, { leftArm: false, rightArm: true });
   },
 
   armchair({ color = '#c28a5a' }) {
@@ -320,6 +390,181 @@ const builders = {
     }
     return g;
   },
+
+  chimney({ width = 1.4, depth = 0.55, height = 1.25 }) {
+    const stone = mat('#6e6a66', { rough: 0.92 });
+    const mantel = mat(DARK_WOOD, { rough: 0.65 });
+    const hearth = mat('#15161a', { rough: 0.85 });
+    const ember = new THREE.MeshStandardMaterial({
+      color: '#ff6a2b', roughness: 0.4, emissive: '#ff4500', emissiveIntensity: 0.85,
+    });
+    return group(
+      at(box(width, height, depth, stone, { r: 0.02 }), 0, 0, 0),
+      at(box(width + 0.08, 0.06, depth + 0.06, mantel, { r: 0.012 }), 0, height - 0.06, 0.02),
+      at(box(width * 0.58, height * 0.55, 0.12, hearth, { r: 0.01 }), 0, 0.08, depth / 2 - 0.04),
+      at(box(width * 0.42, 0.08, 0.14, ember, { r: 0.02 }), 0, 0.12, depth / 2 - 0.05),
+    );
+  },
+
+  washer({ width = 0.65 }) {
+    const body = mat(WHITE, { rough: 0.35 });
+    const drum = mat('#222630', { rough: 0.2, metal: 0.6 });
+    return group(
+      at(box(width, 0.85, 0.65, body, { r: 0.02 }), 0, 0, 0),
+      at(box(width - 0.04, 0.12, 0.02, mat('#d5d3ce', { rough: 0.5 }), { r: 0.005 }), 0, 0.7, 0.325),
+      at(cyl(0.21, 0.21, 0.04, drum, 20), 0, 0.38, 0.32),
+    );
+  },
+
+  roundDiningSet({ width = 1.25, chairs = 4, color = '#383330' }) {
+    // Counter-height circular dark wood table with 2 center storage shelves + 4 high chairs with grey cushions
+    const radius = width / 2;
+    const darkWood = mat(color, { rough: 0.58 });
+    const topWood = mat(darker(color, 1.15), { rough: 0.5 });
+    const cushionMat = mat('#b8babf', { rough: 0.9 });
+    const legSpan = radius * 0.46;
+
+    const g = group(
+      // Round tabletop + apron ring
+      at(cyl(radius, radius, 0.045, topWood, 36), 0, 0.84, 0),
+      at(cyl(radius - 0.035, radius - 0.035, 0.055, darkWood, 32), 0, 0.785, 0),
+      // 2 square storage shelves stacked in the center between the 4 legs
+      at(box(legSpan * 2 + 0.04, 0.032, legSpan * 2 + 0.04, darkWood, { r: 0.008 }), 0, 0.48, 0),
+      at(box(legSpan * 2 + 0.04, 0.032, legSpan * 2 + 0.04, darkWood, { r: 0.008 }), 0, 0.18, 0),
+    );
+
+    // 4 straight square post legs
+    for (const sx of [-1, 1]) {
+      for (const sz of [-1, 1]) {
+        g.add(at(box(0.055, 0.84, 0.055, darkWood, { r: 0.006 }), sx * legSpan, 0, sz * legSpan));
+      }
+    }
+
+    // Counter-height chairs with grey seat cushion, grey upper back pad, and interlocking ring motif
+    const count = Math.max(2, Math.min(8, chairs || 4));
+    for (let i = 0; i < count; i++) {
+      const a = (i * Math.PI * 2) / count + Math.PI / 4;
+      const ch = new THREE.Group();
+      const seatW = 0.44;
+      const seatD = 0.43;
+      const seatH = 0.56;
+      const backH = 0.46;
+
+      // 4 chair legs + footrest stretchers
+      for (const sx of [-1, 1]) {
+        for (const sz of [-1, 1]) {
+          ch.add(at(box(0.032, seatH, 0.032, darkWood, { r: 0.004 }), sx * (seatW / 2 - 0.025), 0, sz * (seatD / 2 - 0.025)));
+        }
+        ch.add(at(box(0.022, 0.024, seatD - 0.05, darkWood, { r: 0.003 }), sx * (seatW / 2 - 0.025), 0.18, 0));
+      }
+      ch.add(at(box(seatW - 0.05, 0.024, 0.022, darkWood, { r: 0.003 }), 0, 0.18, seatD / 2 - 0.025));
+      ch.add(at(box(seatW - 0.05, 0.024, 0.022, darkWood, { r: 0.003 }), 0, 0.18, -seatD / 2 + 0.025));
+
+      // Seat frame + grey upholstered seat cushion
+      ch.add(
+        at(box(seatW, 0.04, seatD, darkWood, { r: 0.008 }), 0, seatH - 0.02, 0),
+        at(box(seatW - 0.02, 0.055, seatD - 0.02, cushionMat, { r: 0.02 }), 0, seatH + 0.02, 0),
+      );
+
+      // Backrest posts + top rail + grey upholstered back pad + ring lattice motif
+      const bz = -seatD / 2 + 0.02;
+      for (const sx of [-1, 1]) {
+        ch.add(at(box(0.034, backH, 0.032, darkWood, { r: 0.004 }), sx * (seatW / 2 - 0.025), seatH, bz));
+      }
+      ch.add(
+        at(box(seatW, 0.035, 0.032, darkWood, { r: 0.006 }), 0, seatH + backH - 0.02, bz),
+        at(box(seatW - 0.07, 0.18, 0.04, cushionMat, { r: 0.015 }), 0, seatH + backH - 0.21, bz + 0.006),
+        at(box(seatW - 0.06, 0.02, 0.024, darkWood, { r: 0.003 }), 0, seatH + 0.19, bz),
+        at(box(seatW - 0.06, 0.02, 0.024, darkWood, { r: 0.003 }), 0, seatH + 0.09, bz),
+      );
+      for (const rx of [-0.09, 0, 0.09]) {
+        const ring = at(cyl(0.045, 0.045, 0.022, darkWood, 16), rx, seatH + 0.14, bz);
+        ring.rotation.x = Math.PI / 2;
+        ch.add(ring);
+      }
+
+      const dist = radius + 0.24;
+      ch.position.set(Math.sin(a) * dist, 0, Math.cos(a) * dist);
+      ch.rotation.y = a + Math.PI;
+      g.add(ch);
+    }
+    return g;
+  },
+
+  coffeeBar({ width = 1.2, color = '#2c3e66' }) {
+    // Navy blue & wood coffee bar / buffet hutch (47.2in W x 15.5in D x 47.4in H = 1.20m x 0.40m x 1.20m)
+    const depth = 0.40;
+    const baseH = 0.84;
+    const hutchH = 0.35;
+    const hutchD = 0.20;
+    const navy = mat(color, { rough: 0.62 });
+    const darkNavy = mat(darker(color, 0.78), { rough: 0.68 });
+    const woodTop = mat('#a67b51', { rough: 0.52 });
+    const glass = new THREE.MeshStandardMaterial({
+      color: '#b8cde0', roughness: 0.18, metalness: 0.2, transparent: true, opacity: 0.55,
+    });
+    const knob = mat(BLACK, { rough: 0.4, metal: 0.6 });
+
+    const leftW = width * 0.66;
+    const leftX = -width / 2 + leftW / 2;
+
+    const g = group(
+      // Base plinth + main navy cabinet body
+      at(box(width + 0.02, 0.075, depth + 0.02, darkNavy, { r: 0.008 }), 0, 0, 0),
+      at(box(width, baseH - 0.075, depth, navy, { r: 0.01 }), 0, 0.075, 0),
+      // Top wide drawer on left (30.7in) + 2 black knobs
+      at(box(leftW - 0.03, 0.14, 0.02, darkNavy, { r: 0.006 }), leftX, baseH - 0.16, depth / 2 + 0.005),
+      at(cyl(0.012, 0.012, 0.02, knob, 12), leftX - 0.18, baseH - 0.09, depth / 2 + 0.02),
+      at(cyl(0.012, 0.012, 0.02, knob, 12), leftX + 0.18, baseH - 0.09, depth / 2 + 0.02),
+      // 2 fluted-glass lower doors on left
+      at(box(leftW / 2 - 0.025, 0.55, 0.018, darkNavy, { r: 0.006 }), leftX - leftW / 4, 0.1, depth / 2 + 0.004),
+      at(box(leftW / 2 - 0.025, 0.55, 0.018, darkNavy, { r: 0.006 }), leftX + leftW / 4, 0.1, depth / 2 + 0.004),
+      at(box(leftW / 2 - 0.09, 0.46, 0.022, glass, { r: 0.004 }), leftX - leftW / 4, 0.145, depth / 2 + 0.005),
+      at(box(leftW / 2 - 0.09, 0.46, 0.022, glass, { r: 0.004 }), leftX + leftW / 4, 0.145, depth / 2 + 0.005),
+      // Right side cabinet panel seams
+      at(box(width * 0.31, 0.70, 0.016, darkNavy, { r: 0.006 }), width / 2 - width * 0.165, 0.1, depth / 2 + 0.004),
+      // Warm butcher-block wood countertop
+      at(box(width + 0.03, 0.035, depth + 0.025, woodTop, { r: 0.008 }), 0, baseH, 0.005),
+      // Upper hutch back panel + side wings + warm wood top shelf
+      at(box(width - 0.02, hutchH, 0.025, navy, { r: 0.006 }), 0, baseH + 0.035, -depth / 2 + 0.015),
+      at(box(0.025, hutchH, hutchD, navy, { r: 0.006 }), -width / 2 + 0.02, baseH + 0.035, -depth / 2 + hutchD / 2),
+      at(box(0.025, hutchH, hutchD, navy, { r: 0.006 }), width / 2 - 0.02, baseH + 0.035, -depth / 2 + hutchD / 2),
+      at(box(width + 0.02, 0.03, hutchD + 0.02, woodTop, { r: 0.008 }), 0, baseH + 0.035 + hutchH, -depth / 2 + hutchD / 2),
+      // Black hanging rail under top hutch shelf
+      at(box(width - 0.08, 0.012, 0.012, knob, { r: 0.004 }), 0, baseH + hutchH - 0.01, -depth / 2 + hutchD - 0.03),
+    );
+
+    // Cable pass-through circle in hutch back
+    const hole = at(cyl(0.038, 0.038, 0.03, mat(WHITE, { rough: 0.9 }), 20), -0.08, baseH + 0.21, -depth / 2 + 0.015);
+    hole.rotation.x = Math.PI / 2;
+    g.add(hole);
+
+    // 6 hanging hooks / mugs on the hutch rail
+    for (let i = 0; i < 6; i++) {
+      const hx = -width / 2 + 0.18 + i * ((width - 0.36) / 5);
+      g.add(at(box(0.008, 0.045, 0.015, mat(METAL, { metal: 0.8, rough: 0.3 }), { r: 0.002 }), hx, baseH + hutchH - 0.055, -depth / 2 + hutchD - 0.03));
+    }
+    return g;
+  },
+
+  pantry({ width = 0.7, color = '#e4e1da' }) {
+    // Tall kitchen pantry cabinet with the exact same footprint & height as fridge (0.70m W x 0.68m D x 1.92m H)
+    const body = mat(color, { rough: 0.55 });
+    const seam = mat(darker(color, 0.78), { rough: 0.7 });
+    const handle = mat('#6e737b', { metal: 0.75, rough: 0.3 });
+    return group(
+      at(box(width, 1.92, 0.68, body, { r: 0.02 }), 0, 0, 0),
+      // Horizontal door split between upper & lower pantry doors
+      at(box(width - 0.04, 0.008, 0.006, seam, { r: 0 }), 0, 1.12, 0.341),
+      // Vertical center split between left & right pantry doors
+      at(box(0.008, 1.82, 0.006, seam, { r: 0 }), 0, 0.05, 0.341),
+      // Upper and lower door handles
+      at(box(0.016, 0.28, 0.025, handle, { r: 0.006 }), -0.045, 1.22, 0.35),
+      at(box(0.016, 0.28, 0.025, handle, { r: 0.006 }), 0.045, 1.22, 0.35),
+      at(box(0.016, 0.28, 0.025, handle, { r: 0.006 }), -0.045, 0.76, 0.35),
+      at(box(0.016, 0.28, 0.025, handle, { r: 0.006 }), 0.045, 0.76, 0.35),
+    );
+  },
 };
 
 export const FURNITURE_TYPES = Object.keys(builders);
@@ -330,6 +575,12 @@ export function footprint(item) {
   switch (item.type) {
     case 'rug': return item.size || [2, 1.4];
     case 'sofa': return [w || 2.2, 0.95];
+    case 'loveseat':
+    case 'loveseatLeft':
+    case 'loveseatRight': return [w || 1.5, 0.95];
+    case 'chaise':
+    case 'chaiseLeft':
+    case 'chaiseRight': return [w || 0.95, 1.65];
     case 'armchair': return [0.92, 0.88];
     case 'coffeeTable': return [w || 1.1, 0.58];
     case 'tv': return [w || 1.7, 0.4];
@@ -348,6 +599,11 @@ export function footprint(item) {
     case 'desk': return [w || 1.4, 0.65];
     case 'wardrobe': return [w || 1.6, 0.6];
     case 'bookshelf': return [w || 1, 0.32];
+    case 'chimney': return [w || 1.4, item.depth || 0.55];
+    case 'washer': return [w || 0.65, 0.65];
+    case 'roundDiningSet': return [ (w || 1.25) + 0.55, (w || 1.25) + 0.55 ];
+    case 'coffeeBar': return [w || 1.2, 0.42];
+    case 'pantry': return [w || 0.7, 0.68];
     default: return [0.6, 0.6];
   }
 }
