@@ -14,12 +14,13 @@ export const STAGE_BG = '#0a0e1a';
 const rad = THREE.MathUtils.degToRad;
 const clamp = THREE.MathUtils.clamp;
 const ORBIT_AZ = 40;       // degrees of freedom either side of the plan's default view
-const EL_MIN = 26;
-const EL_MAX = 70;
-const ZOOM_MIN = 0.55;     // closest
-const ZOOM_MAX = 1.2;
+const EL_MIN = 20;
+const EL_MAX = 82;
+const ZOOM_MIN = 0.4;      // closest
+const ZOOM_MAX = 1.4;
 
-export function createWorld(canvas, config, store, { onHover, onPick, background = STAGE_BG }) {
+export function createWorld(canvas, config, store, { onHover, onPick, onMove, editable = false, background = STAGE_BG }) {
+  let isEditable = Boolean(editable);
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: false, powerPreference: 'high-performance' });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -45,7 +46,17 @@ export function createWorld(canvas, config, store, { onHover, onPick, background
 
   const house = buildHouse(config, camDir);
   scene.add(house.group);
-  scene.add(buildFurniture(config.furniture));
+  const furnitureGroup = buildFurniture(config.furniture);
+  scene.add(furnitureGroup);
+
+  const furnitureMeshes = [];
+  const furnitureByIndex = new Map();
+  furnitureGroup.children.forEach((g) => {
+    if (g.userData?.kind === 'furniture') furnitureByIndex.set(g.userData.index, g);
+    g.traverse((o) => {
+      if (o.isMesh) furnitureMeshes.push(o);
+    });
+  });
 
   const lights = new Map();
   for (const cfg of config.lights) {
@@ -69,7 +80,7 @@ export function createWorld(canvas, config, store, { onHover, onPick, background
     acs.set(cfg.id, unit);
     scene.add(unit.group);
   }
-  const hitTargets = [...[...lights.values()].map((u) => u.hit), ...[...acs.values()].map((u) => u.hit), ...house.floors];
+  const baseHitTargets = [...[...lights.values()].map((u) => u.hit), ...[...acs.values()].map((u) => u.hit), ...house.floors];
 
   // Night-time ambience: enough to read the model with every lamp off.
   scene.add(new THREE.HemisphereLight(0x8ea6ff, 0x0b0e17, 0.42));
@@ -191,32 +202,60 @@ export function createWorld(canvas, config, store, { onHover, onPick, background
 
   const unsubscribe = store.on((change) => {
     if (change.type === 'tick') return;
-    if (change.type === 'light') lights.get(change.id).apply(store.state.lights[change.id]);
-    else if (change.type === 'ac') acs.get(change.id).apply(store.state.acs[change.id]);
+    if (change.type === 'light') lights.get(change.id)?.apply(store.state.lights[change.id]);
+    else if (change.type === 'ac') acs.get(change.id)?.apply(store.state.acs[change.id]);
     else syncAll();
     wake();
   });
 
-  /* ---------- picking ---------- */
+  /* ---------- picking & 3D floor-plane dragging ---------- */
 
   const raycaster = new THREE.Raycaster();
   const ndc = new THREE.Vector2();
+  const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  const planePt = new THREE.Vector3();
   let hovered = null;
   let drag = null;
+  let dragItem = null;
 
-  function pick(ev) {
+  function setRay(ev) {
     const r = canvas.getBoundingClientRect();
     ndc.set(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1);
     raycaster.setFromCamera(ndc, camera);
-    const hits = raycaster.intersectObjects(hitTargets, false);
+  }
+
+  function pick(ev) {
+    setRay(ev);
+    const targets = isEditable ? [...baseHitTargets, ...furnitureMeshes] : baseHitTargets;
+    const hits = raycaster.intersectObjects(targets, false);
     if (!hits.length) return null;
-    // Devices win over the floor they stand on.
-    const device = hits.find((h) => h.object.userData.kind !== 'room');
-    return (device || hits[0]).object.userData;
+    // Devices and furniture win over the room floor they stand on.
+    const nonFloor = hits.find((h) => h.object.userData.kind && h.object.userData.kind !== 'room');
+    return (nonFloor || hits[0]).object.userData;
+  }
+
+  function pickFloorPoint(ev, yPlane = 0) {
+    setRay(ev);
+    floorPlane.constant = -yPlane;
+    return raycaster.ray.intersectPlane(floorPlane, planePt) ? [planePt.x, planePt.z] : null;
   }
 
   function unitOf(t) {
     return t?.kind === 'light' ? lights.get(t.id) : t?.kind === 'ac' ? acs.get(t.id) : null;
+  }
+
+  function object3DOf(t) {
+    if (t?.kind === 'furniture') return furnitureByIndex.get(t.index) || null;
+    if (t?.kind === 'light') return lights.get(t.id)?.group || null;
+    return null;
+  }
+
+  function isTargetLocked(t) {
+    if (t?.kind === 'furniture') return Boolean(config.furniture[t.index]?.locked);
+    if (t?.kind === 'light') return Boolean(config.lights.find((l) => l.id === t.id)?.locked);
+    if (t?.kind === 'ac') return Boolean(config.acs.find((a) => a.id === t.id)?.locked);
+    if (t?.kind === 'room') return Boolean(config.rooms.find((r) => r.id === t.id)?.locked);
+    return false;
   }
 
   function screenAnchor(t) {
@@ -227,15 +266,22 @@ export function createWorld(canvas, config, store, { onHover, onPick, background
   }
 
   function setHover(t) {
-    const same = hovered?.kind === t?.kind && hovered?.id === t?.id;
+    const same = hovered?.kind === t?.kind && hovered?.id === t?.id && hovered?.index === t?.index;
     if (same) return;
     const prev = unitOf(hovered);
     if (prev) prev.hoverGoal = 0;
-    hovered = t && t.kind !== 'room' ? t : null;
+    hovered = t && (t.kind !== 'room' || isEditable) ? t : null;
     const next = unitOf(hovered);
     if (next) next.hoverGoal = 1;
-    canvas.style.cursor = hovered ? 'pointer' : drag?.moved ? 'grabbing' : 'grab';
-    onHover(hovered ? { ...hovered, ...screenAnchor(hovered) } : null);
+    if (dragItem?.moved || drag?.moved) {
+      canvas.style.cursor = 'grabbing';
+    } else if (hovered && hovered.kind !== 'room') {
+      canvas.style.cursor = isEditable && !isTargetLocked(hovered) ? 'move' : 'pointer';
+    } else {
+      canvas.style.cursor = 'grab';
+    }
+    const anchor = screenAnchor(hovered);
+    onHover(hovered && anchor ? { ...hovered, ...anchor } : null);
     wake();
   }
 
@@ -253,12 +299,36 @@ export function createWorld(canvas, config, store, { onHover, onPick, background
     if (fingers.size === 2) {
       pinch = { spread: spread(), zoom: rig.zoom };
       drag = null;
+      dragItem = null;
       setHover(null);
       return;
     }
     if (fingers.size > 2) return;
+
+    if (isEditable && onMove && ev.button === 0 && !ev.shiftKey) {
+      const hit = pick(ev);
+      if (hit && (hit.kind === 'furniture' || hit.kind === 'light') && !isTargetLocked(hit)) {
+        const obj = object3DOf(hit);
+        const yPlane = obj ? obj.position.y : 0;
+        const pt = pickFloorPoint(ev, yPlane);
+        if (obj && pt) {
+          dragItem = {
+            target: hit,
+            obj,
+            yPlane,
+            startClient: [ev.clientX, ev.clientY],
+            offset: [pt[0] - obj.position.x, pt[1] - obj.position.z],
+            lastPos: [obj.position.x, obj.position.z],
+            moved: false,
+          };
+          return;
+        }
+      }
+    }
+
     drag = { x: ev.clientX, y: ev.clientY, az: rig.goal.az, el: rig.goal.el, moved: false };
   });
+
   canvas.addEventListener('pointermove', (ev) => {
     if (fingers.has(ev.pointerId)) fingers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
     if (pinch) {
@@ -269,12 +339,38 @@ export function createWorld(canvas, config, store, { onHover, onPick, background
       }
       return;
     }
+    if (dragItem) {
+      const dx = ev.clientX - dragItem.startClient[0];
+      const dy = ev.clientY - dragItem.startClient[1];
+      if (!dragItem.moved && Math.hypot(dx, dy) > 4) {
+        dragItem.moved = true;
+        canvas.style.cursor = 'grabbing';
+      }
+      if (dragItem.moved) {
+        const pt = pickFloorPoint(ev, dragItem.yPlane);
+        if (pt) {
+          const nx = Math.round((pt[0] - dragItem.offset[0]) / 0.05) * 0.05;
+          const nz = Math.round((pt[1] - dragItem.offset[1]) / 0.05) * 0.05;
+          const rx = Math.round(nx * 100) / 100;
+          const rz = Math.round(nz * 100) / 100;
+          dragItem.obj.position.x = rx;
+          dragItem.obj.position.z = rz;
+          dragItem.lastPos = [rx, rz];
+          shadowFrames = Math.max(shadowFrames, 2);
+          onMove?.(dragItem.target, [rx, rz], false);
+          wake(2);
+        }
+      }
+      return;
+    }
     if (drag) {
       const dx = ev.clientX - drag.x;
       const dy = ev.clientY - drag.y;
       if (!drag.moved && Math.hypot(dx, dy) > 5) { drag.moved = true; setHover(null); canvas.style.cursor = 'grabbing'; }
       if (drag.moved) {
-        rig.goal.az = clamp(drag.az - dx * 0.35, baseAz - ORBIT_AZ, baseAz + ORBIT_AZ);
+        rig.goal.az = isEditable
+          ? drag.az - dx * 0.4
+          : clamp(drag.az - dx * 0.35, baseAz - ORBIT_AZ, baseAz + ORBIT_AZ);
         rig.goal.el = clamp(drag.el + dy * 0.3, EL_MIN, EL_MAX);
         frameGoal();
         wake();
@@ -283,9 +379,22 @@ export function createWorld(canvas, config, store, { onHover, onPick, background
     }
     setHover(pick(ev));
   });
+
   const release = (ev) => {
     fingers.delete(ev.pointerId);
     if (pinch) { if (!fingers.size) pinch = null; return; } // lifting after a pinch picks nothing
+    if (dragItem) {
+      const item = dragItem;
+      dragItem = null;
+      canvas.style.cursor = 'grab';
+      if (item.moved) {
+        onMove?.(item.target, item.lastPos, true);
+      } else {
+        onPick(item.target);
+      }
+      wake(3);
+      return;
+    }
     if (!drag) return;
     const wasDrag = drag.moved;
     drag = null;
@@ -293,7 +402,7 @@ export function createWorld(canvas, config, store, { onHover, onPick, background
     if (wasDrag) return;
     const t = pick(ev);
     if (!t) { onPick(null); return; }
-    if (t.kind === 'light') lights.get(t.id).bump();
+    if (t.kind === 'light') lights.get(t.id)?.bump();
     onPick(t);
     wake();
   };
@@ -302,8 +411,9 @@ export function createWorld(canvas, config, store, { onHover, onPick, background
     fingers.delete(ev.pointerId);
     if (!fingers.size) pinch = null;
     drag = null;
+    dragItem = null;
   });
-  canvas.addEventListener('pointerleave', () => { if (!drag) setHover(null); });
+  canvas.addEventListener('pointerleave', () => { if (!drag && !dragItem) setHover(null); });
   canvas.addEventListener('wheel', (ev) => {
     ev.preventDefault();
     rig.zoom = clamp(rig.zoom * Math.exp(ev.deltaY * 0.0015), ZOOM_MIN, ZOOM_MAX);
@@ -336,7 +446,8 @@ export function createWorld(canvas, config, store, { onHover, onPick, background
     if (active || awake > 0) {
       composer.render(dt);
       awake = Math.max(0, awake - 1);
-      if (hovered && active) onHover({ ...hovered, ...screenAnchor(hovered) });
+      const anchor = hovered ? screenAnchor(hovered) : null;
+      if (hovered && anchor && active) onHover({ ...hovered, ...anchor });
     }
     if (running && (active || awake > 0)) raf = requestAnimationFrame(frame);
   }
@@ -362,6 +473,20 @@ export function createWorld(canvas, config, store, { onHover, onPick, background
   const world = {
     lights,
     acs,
+
+    setEditable(on) { isEditable = Boolean(on); wake(2); },
+    get editable() { return isEditable; },
+    getCameraState() { return { az: rig.az, el: rig.el, zoom: rig.zoom, focus: rig.focus }; },
+    setCameraState(s) {
+      if (!s) return;
+      if (s.az != null) rig.az = rig.goal.az = s.az;
+      if (s.el != null) rig.el = rig.goal.el = s.el;
+      if (s.zoom != null) rig.zoom = s.zoom;
+      if (s.focus !== undefined) rig.focus = s.focus;
+      frameGoal();
+      updateRig(0, true);
+      wake(3);
+    },
 
     setInsets(top, bottom) { topInset = top; bottomInset = bottom; resize(); },
     resize,

@@ -5,9 +5,9 @@ import { FURNITURE_TYPES, footprint } from '../three/furniture.js';
 
 export const SCENE_ICONS = ['sun', 'sofa', 'film', 'moon', 'door', 'bed', 'tv', 'sparkles'];
 export const WALLS = ['north', 'south', 'east', 'west'];
-const FURNITURE_KEYS = ['type', 'pos', 'rot', 'width', 'height', 'size', 'color', 'chairs', 'stools', 'upper'];
-const LIGHT_KEYS = ['id', 'name', 'room', 'type', 'pos', 'y', 'rot', 'length', 'capabilities', 'color'];
-const AC_KEYS = ['id', 'name', 'room', 'wall', 'pos', 'y', 'min', 'max'];
+const FURNITURE_KEYS = ['type', 'pos', 'rot', 'width', 'depth', 'height', 'size', 'color', 'chairs', 'stools', 'upper', 'name', 'group', 'locked'];
+const LIGHT_KEYS = ['id', 'name', 'room', 'type', 'pos', 'y', 'rot', 'length', 'capabilities', 'color', 'disabled', 'locked'];
+const AC_KEYS = ['id', 'name', 'room', 'wall', 'pos', 'y', 'min', 'max', 'locked'];
 
 export class PlanEditError extends Error {}
 
@@ -51,7 +51,7 @@ function cleanFurniture(item, where) {
   const out = pick(item, FURNITURE_KEYS);
   out.pos = out.pos.map(round);
   if (out.rot != null) { if (!isNum(out.rot)) fail(`${where}: "rot" must be a number of degrees`); out.rot = Math.round(out.rot); }
-  for (const k of ['width', 'height']) {
+  for (const k of ['width', 'depth', 'height']) {
     if (out[k] != null && !(isNum(out[k]) && out[k] > 0.1 && out[k] < 12)) fail(`${where}: "${k}" must be metres between 0.1 and 12`);
   }
   if (out.size != null && !(isPoint(out.size) && out.size.every((v) => v > 0.1 && v < 15))) fail(`${where}: "size" must be [width, depth] in metres`);
@@ -339,6 +339,7 @@ export const FURNITURE_GUIDE = {
   plant: 'potted plant; option height',
   vanity: 'bathroom vanity with basin and mirror; option width',
   bathtub: 'bathtub',
+  tubShower: 'standing tub shower with glass shower shield and rainfall shower column; options width, depth',
   toilet: 'toilet',
   desk: 'desk; option width',
   wardrobe: 'wardrobe; options width, height',

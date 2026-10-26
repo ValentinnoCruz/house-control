@@ -77,17 +77,17 @@ export function normalize(raw) {
       `Room "${r.id}" needs "rect": [x, z, width, depth]`);
     const [x, z, w, d] = r.rect;
     need(w > 0 && d > 0, `Room "${r.id}" has an empty rect`);
-    return { id: r.id, name: r.name || r.id, x, z, w, d, floor: r.floor || 'oak' };
+    return { id: r.id, name: r.name || r.id, x, z, w, d, floor: r.floor || 'oak', locked: Boolean(r.locked) };
   });
   const roomIds = new Set(rooms.map((r) => r.id));
 
   const openings = (raw.openings || []).map((o, i) => {
     need(isPoint(o.from) && isPoint(o.to), `Opening #${i + 1} needs "from" and "to" points`);
     need(o.from[0] === o.to[0] || o.from[1] === o.to[1], `Opening #${i + 1} must be axis-aligned`);
-    return { type: o.type || 'door', from: o.from, to: o.to, sill: o.sill ?? 0.85, head: o.head ?? 2.1 };
+    return { type: o.type || 'door', from: o.from, to: o.to, sill: o.sill ?? 0.85, head: o.head ?? 2.1, locked: Boolean(o.locked) };
   });
 
-  const lights = (raw.lights || []).map((l) => {
+  const allLights = (raw.lights || []).map((l) => {
     unique(l.id, 'A light');
     need(roomIds.has(l.room), `Light "${l.id}" refers to unknown room "${l.room}"`);
     need(LIGHT_TYPES.includes(l.type), `Light "${l.id}" has unknown type "${l.type}" (use ${LIGHT_TYPES.join(', ')})`);
@@ -96,9 +96,12 @@ export function normalize(raw) {
       ...l,
       name: l.name || l.id,
       rot: l.rot || 0,
+      disabled: Boolean(l.disabled),
+      locked: Boolean(l.locked),
       capabilities: l.capabilities || [], // plain smart plugs: on/off only
     };
   });
+  const lights = allLights.filter((l) => !l.disabled);
 
   const acs = (raw.acs || []).map((a) => {
     unique(a.id, 'An AC');
@@ -128,6 +131,7 @@ export function normalize(raw) {
     openings,
     furniture: raw.furniture || [],
     lights,
+    allLights,
     acs,
     scenes,
     bounds: { minX, minZ, maxX, maxZ },

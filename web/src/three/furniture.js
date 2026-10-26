@@ -93,10 +93,12 @@ function doorLines(width, height, y, z, count, material) {
 }
 
 const builders = {
-  rug({ size = [2, 1.4], color = '#3b4a66' }) {
+  rug({ size = [2, 1.4], width, depth, color = '#3b4a66' }) {
+    const rw = width || size[0] || 2;
+    const rd = depth || size[1] || 1.4;
     const g = group(
-      at(box(size[0], 0.016, size[1], mat(color, { rough: 1 }), { r: 0.006 }), 0, 0, 0),
-      at(box(size[0] - 0.24, 0.018, size[1] - 0.24, mat(darker(color, 1.18), { rough: 1 }), { r: 0.006 }), 0, 0, 0),
+      at(box(rw, 0.016, rd, mat(color, { rough: 1 }), { r: 0.006 }), 0, 0, 0),
+      at(box(Math.max(0.1, rw - 0.24), 0.018, Math.max(0.1, rd - 0.24), mat(darker(color, 1.18), { rough: 1 }), { r: 0.006 }), 0, 0, 0),
     );
     g.userData.flat = true;
     return g;
@@ -339,6 +341,40 @@ const builders = {
     );
   },
 
+  tubShower({ width = 1.7, depth = 0.8 }) {
+    const tubMat = mat(WHITE, { rough: 0.22 });
+    const waterMat = mat('#9fd3ec', { rough: 0.1, emissive: '#1d4f6b', emissiveIntensity: 0.25 });
+    const chrome = mat(METAL, { rough: 0.18, metal: 0.92 });
+    const darkMetal = mat(BLACK, { rough: 0.3, metal: 0.8 });
+    const glass = new THREE.MeshStandardMaterial({
+      color: '#cfe8f7', roughness: 0.12, metalness: 0.15, transparent: true, opacity: 0.42,
+    });
+    const screenW = width * 0.48;
+    const screenH = 1.42;
+    const headX = -width / 2 + 0.1;
+    const arm = at(cyl(0.012, 0.012, 0.34, chrome, 10), headX + 0.17, 1.98, 0);
+    arm.rotation.z = Math.PI / 2;
+    return group(
+      // Bathtub apron & basin
+      at(box(width, 0.54, depth, tubMat, { r: 0.06 }), 0, 0, 0),
+      at(box(Math.max(0.2, width - 0.18), 0.02, Math.max(0.2, depth - 0.18), waterMat, { r: 0.009 }), 0, 0.525, 0),
+      // Drain & tub spout
+      at(cyl(0.028, 0.028, 0.01, chrome, 14), headX + 0.14, 0.535, 0),
+      at(box(0.09, 0.025, 0.035, chrome, { r: 0.006 }), headX + 0.04, 0.62, 0),
+      // Mixer valve + handle
+      at(cyl(0.035, 0.035, 0.03, darkMetal, 14), headX + 0.02, 1.05, 0),
+      // Standing shower riser column + rainfall showerhead
+      at(cyl(0.013, 0.013, 1.44, chrome, 12), headX, 0.54, 0),
+      arm,
+      at(cyl(0.13, 0.13, 0.018, chrome, 24), headX + 0.32, 1.95, 0),
+      at(cyl(0.12, 0.12, 0.006, darkMetal, 24), headX + 0.32, 1.945, 0),
+      // Frameless tempered glass standing shower shield + frame rail
+      at(box(screenW, screenH, 0.016, glass, { r: 0.004 }), -width / 2 + screenW / 2 + 0.03, 0.54, depth / 2 - 0.03),
+      at(box(0.024, screenH, 0.028, darkMetal, { r: 0.004 }), -width / 2 + 0.03, 0.54, depth / 2 - 0.03),
+      at(box(screenW, 0.02, 0.024, darkMetal, { r: 0.004 }), -width / 2 + screenW / 2 + 0.03, 0.54, depth / 2 - 0.03),
+    );
+  },
+
   toilet() {
     const c = mat(WHITE, { rough: 0.25 });
     const bowl = at(cyl(0.19, 0.13, 0.4, c), 0, 0, 0.1);
@@ -569,11 +605,11 @@ const builders = {
 
 export const FURNITURE_TYPES = Object.keys(builders);
 
-// Approximate [width, depth] of each piece, for the 2D plan editor.
-export function footprint(item) {
+// Default [width, depth] of each piece before custom width/depth overrides.
+export function baseFootprint(item) {
   const w = item.width;
   switch (item.type) {
-    case 'rug': return item.size || [2, 1.4];
+    case 'rug': return [w || item.size?.[0] || 2, item.depth || item.size?.[1] || 1.4];
     case 'sofa': return [w || 2.2, 0.95];
     case 'loveseat':
     case 'loveseatLeft':
@@ -595,35 +631,58 @@ export function footprint(item) {
     case 'plant': return [0.45, 0.45];
     case 'vanity': return [w || 1, 0.5];
     case 'bathtub': return [1.7, 0.78];
+    case 'tubShower': return [w || 1.7, item.depth || 0.8];
     case 'toilet': return [0.4, 0.66];
     case 'desk': return [w || 1.4, 0.65];
     case 'wardrobe': return [w || 1.6, 0.6];
     case 'bookshelf': return [w || 1, 0.32];
     case 'chimney': return [w || 1.4, item.depth || 0.55];
     case 'washer': return [w || 0.65, 0.65];
-    case 'roundDiningSet': return [ (w || 1.25) + 0.55, (w || 1.25) + 0.55 ];
+    case 'roundDiningSet': return [(w || 1.25) + 0.55, (w || 1.25) + 0.55];
     case 'coffeeBar': return [w || 1.2, 0.42];
     case 'pantry': return [w || 0.7, 0.68];
     default: return [0.6, 0.6];
   }
 }
 
+// Approximate [width, depth] of each piece, honouring custom width and depth (length).
+export function footprint(item) {
+  const [bw, bd] = baseFootprint(item);
+  if (item.type === 'rug') {
+    return [item.width || item.size?.[0] || bw, item.depth || item.size?.[1] || bd];
+  }
+  const w = item.width != null && ['armchair', 'fridge', 'nightstand', 'plant', 'bathtub', 'toilet'].includes(item.type)
+    ? item.width
+    : bw;
+  const d = item.depth != null ? item.depth : bd;
+  return [w, d];
+}
+
 export function buildFurniture(items) {
   const root = new THREE.Group();
-  for (const item of items) {
+  items.forEach((item, index) => {
     const make = builders[item.type];
     if (!make || !Array.isArray(item.pos)) {
       console.warn(`[plan] skipping furniture of unknown type "${item.type}"`);
-      continue;
+      return;
     }
     const g = make(item);
+    const [bw, bd] = baseFootprint(item);
+    const [tw, td] = footprint(item);
+    if (bw > 0 && Math.abs(tw - bw) > 0.005) g.scale.x = tw / bw;
+    if (bd > 0 && Math.abs(td - bd) > 0.005) g.scale.z = td / bd;
     g.position.set(item.pos[0], item.y || 0, item.pos[1]);
     g.rotation.y = THREE.MathUtils.degToRad(item.rot || 0);
+    g.userData = { ...g.userData, kind: 'furniture', index };
     const flat = g.userData.flat;
     g.traverse((o) => {
-      if (o.isMesh) { o.castShadow = !flat; o.receiveShadow = true; }
+      if (o.isMesh) {
+        o.castShadow = !flat;
+        o.receiveShadow = true;
+        o.userData = { ...o.userData, kind: 'furniture', index };
+      }
     });
     root.add(g);
-  }
+  });
   return root;
 }
