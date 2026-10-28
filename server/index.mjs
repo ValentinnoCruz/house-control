@@ -31,6 +31,8 @@ const FILES = {
   settings: path.join(DATA_DIR, 'settings.json'),
   govee: path.join(DATA_DIR, 'govee.json'),
   homeassistant: path.join(DATA_DIR, 'homeassistant.json'),
+  hue: path.join(DATA_DIR, 'hue.json'),
+  tuya: path.join(DATA_DIR, 'tuya.json'),
   log: path.join(DATA_DIR, 'events.log'),
 };
 
@@ -687,12 +689,402 @@ setInterval(() => {
   if (goveeIds.length) govee.pollAll(goveeIds);
 }, 15000);
 
+// ---------------------------------------------------------------------------
+// Home Assistant & Philips Hue Services
+// ---------------------------------------------------------------------------
+class HomeAssistantService {
+  constructor() {
+    const saved = readJSON(FILES.homeassistant, { connected: false, url: '', token: '', name: '' });
+    this.connected = Boolean(saved.connected && saved.url && saved.token);
+    this.url = (saved.url || '').replace(/\/+$/, '');
+    this.token = saved.token || '';
+    this.name = saved.name || 'Home Assistant';
+    this.version = saved.version || '';
+  }
+
+  save() {
+    writeJSON(FILES.homeassistant, {
+      connected: this.connected,
+      url: this.url,
+      token: this.token,
+      name: this.name,
+      version: this.version,
+    });
+  }
+
+  get info() {
+    return {
+      connected: this.connected,
+      url: this.url,
+      name: this.name,
+      version: this.version,
+    };
+  }
+
+  async discover() {
+    const candidates = ['http://homeassistant.local:8123', 'http://127.0.0.1:8123'];
+    const found = [];
+    for (const base of candidates) {
+      try {
+        const res = await fetch(`${base}/manifest.json`, { signal: AbortSignal.timeout(1500) });
+        if (res.ok) found.push({ name: 'Home Assistant', url: base });
+      } catch { /* ignore */ }
+    }
+    return found;
+  }
+
+  async connect(rawUrl, rawToken) {
+    const cleanUrl = String(rawUrl || '').trim().replace(/\/+$/, '');
+    const cleanToken = String(rawToken || '').trim();
+    if (!cleanUrl || !cleanToken) throw new Error('Enter both the Home Assistant URL and Long-Lived Access Token');
+    const res = await fetch(`${cleanUrl}/api/config`, {
+      headers: { Authorization: `Bearer ${cleanToken}` },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (res.status === 401 || res.status === 403) throw new Error('Access token was rejected by Home Assistant');
+    if (!res.ok) throw new Error(`Home Assistant returned HTTP ${res.status}`);
+    const cfg = await res.json();
+    this.url = cleanUrl;
+    this.token = cleanToken;
+    this.name = cfg.location_name || 'Home Assistant';
+    this.version = cfg.version || '';
+    this.connected = true;
+    this.save();
+    logEvent(`Connected to Home Assistant "${this.name}" at ${this.url}`);
+  }
+
+  disconnect() {
+    this.connected = false;
+    this.token = '';
+    this.save();
+  }
+
+  async listDevices() {
+    if (!this.connected) return [];
+    const res = await fetch(`${this.url}/api/states`, {
+      headers: { Authorization: `Bearer ${this.token}` },
+      signal: AbortSignal.timeout(6000),
+    });
+    if (!res.ok) throw new Error(`Home Assistant HTTP ${res.status}`);
+    const states = await res.json();
+    const out = [];
+    for (const s of states) {
+      const [domain] = String(s.entity_id || '').split('.');
+      const a = s.attributes || {};
+      const name = a.friendly_name || s.entity_id;
+      const online = s.state !== 'unavailable' && s.state !== 'unknown';
+      if (domain === 'light' || domain === 'switch') {
+        const modes = a.supported_color_modes || [];
+        const caps = [];
+        if (domain === 'light') {
+          if (modes.some((m) => m !== 'onoff')) caps.push('brightness');
+          if (modes.some((m) => m === 'color_temp' || m === 'hs' || m === 'rgb' || m === 'xy')) caps.push('temp');
+          if (modes.some((m) => ['hs', 'rgb', 'rgbw', 'rgbww', 'xy'].includes(m))) caps.push('color');
+        }
+        out.push({
+          service: 'homeassistant',
+          id: s.entity_id,
+          name,
+          kind: 'light',
+          online,
+          capabilities: caps,
+          detail: s.entity_id,
+        });
+      } else if (domain === 'climate') {
+        out.push({
+          service: 'homeassistant',
+          id: s.entity_id,
+          name,
+          kind: 'ac',
+          online,
+          min: a.min_temp ?? 16,
+          max: a.max_temp ?? 30,
+          detail: s.entity_id,
+        });
+      } else if (domain === 'sensor' && a.device_class === 'temperature') {
+        out.push({
+          service: 'homeassistant',
+          id: s.entity_id,
+          name,
+          kind: 'sensor',
+          online,
+          detail: `${s.state} ${a.unit_of_measurement || '°C'}`,
+        });
+      }
+    }
+    return out;
+  }
+
+  async sendCommand(id, patch) {
+    if (!this.connected) throw new Error('Home Assistant is not connected');
+    const [domain] = String(id).split('.');
+    const callSvc = async (svcDomain, service, body) => {
+      const res = await fetch(`${this.url}/api/services/${svcDomain}/${service}`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${this.token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entity_id: id, ...body }),
+      });
+      if (!res.ok) throw new Error(`Home Assistant service ${svcDomain}.${service} failed (HTTP ${res.status})`);
+    };
+    if (domain === 'switch') {
+      if ('on' in patch) await callSvc('switch', patch.on ? 'turn_on' : 'turn_off', {});
+    } else if (domain === 'light') {
+      if (patch.on === false) {
+        await callSvc('light', 'turn_off', {});
+      } else {
+        const extra = {};
+        if ('brightness' in patch) extra.brightness_pct = Math.round(patch.brightness * 100);
+        if ('color' in patch && patch.color) {
+          const rgb = hexToRgb(patch.color);
+          if (rgb) extra.rgb_color = [rgb.r, rgb.g, rgb.b];
+        } else if ('temp' in patch && patch.temp) {
+          extra.kelvin = Math.round(patch.temp);
+        }
+        await callSvc('light', 'turn_on', extra);
+      }
+    } else if (domain === 'climate') {
+      if (patch.on === false) await callSvc('climate', 'turn_off', {});
+      else {
+        if ('mode' in patch) await callSvc('climate', 'set_hvac_mode', { hvac_mode: patch.mode });
+        if ('target' in patch) await callSvc('climate', 'set_temperature', { temperature: patch.target });
+        if ('fan' in patch) await callSvc('climate', 'set_fan_mode', { fan_mode: patch.fan });
+        if (patch.on === true && !('mode' in patch)) await callSvc('climate', 'turn_on', {});
+      }
+    }
+  }
+}
+
+class HueService {
+  constructor() {
+    const saved = readJSON(FILES.hue, { connected: false, host: '', key: '', name: '', bridgeId: '' });
+    this.connected = Boolean(saved.connected && saved.host && saved.key);
+    this.host = saved.host || '';
+    this.key = saved.key || '';
+    this.name = saved.name || 'Hue Bridge';
+    this.bridgeId = saved.bridgeId || '';
+  }
+
+  save() {
+    writeJSON(FILES.hue, {
+      connected: this.connected,
+      host: this.host,
+      key: this.key,
+      name: this.name,
+      bridgeId: this.bridgeId,
+    });
+  }
+
+  get info() {
+    return {
+      connected: this.connected,
+      host: this.host,
+      name: this.name,
+      bridgeId: this.bridgeId,
+    };
+  }
+
+  async discover() {
+    try {
+      const res = await fetch('https://discovery.meethue.com', { signal: AbortSignal.timeout(3000) });
+      if (!res.ok) return [];
+      const list = await res.json();
+      return (Array.isArray(list) ? list : []).map((b) => ({
+        host: b.internalipaddress,
+        bridgeId: b.id,
+        name: b.name || 'Philips Hue Bridge',
+      })).filter((b) => b.host);
+    } catch {
+      return [];
+    }
+  }
+
+  async pair({ host, bridgeId, name }) {
+    const cleanHost = String(host || '').trim();
+    if (!cleanHost) throw new Error('Bridge IP address is required');
+    const res = await fetch(`http://${cleanHost}/api`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ devicetype: 'house_control#windows' }),
+      signal: AbortSignal.timeout(4000),
+    });
+    const data = await res.json();
+    const first = Array.isArray(data) ? data[0] : null;
+    if (first?.error?.type === 101) {
+      return { waiting: true };
+    }
+    if (first?.error) {
+      throw new Error(first.error.description || 'Hue pairing error');
+    }
+    if (first?.success?.username) {
+      this.host = cleanHost;
+      this.key = first.success.username;
+      this.bridgeId = bridgeId || '';
+      this.name = name || 'Hue Bridge';
+      this.connected = true;
+      this.save();
+      logEvent(`Paired with Philips Hue Bridge at ${this.host}`);
+      return true;
+    }
+    throw new Error('Unexpected response from Hue Bridge');
+  }
+
+  disconnect() {
+    this.connected = false;
+    this.key = '';
+    this.save();
+  }
+
+  async listDevices() {
+    if (!this.connected) return [];
+    const res = await fetch(`http://${this.host}/api/${this.key}/lights`, { signal: AbortSignal.timeout(4000) });
+    if (!res.ok) throw new Error(`Hue Bridge HTTP ${res.status}`);
+    const body = await res.json();
+    return Object.entries(body || {}).map(([id, d]) => {
+      const t = String(d.type || '').toLowerCase();
+      const caps = [];
+      if (!t.includes('on/off')) caps.push('brightness');
+      if (t.includes('color') || t.includes('ambiance')) caps.push('temp');
+      if (t.includes('color')) caps.push('color');
+      return {
+        service: 'hue',
+        id,
+        name: d.name || `Hue Light ${id}`,
+        kind: 'light',
+        online: d.state?.reachable !== false,
+        capabilities: caps,
+        detail: d.productname || d.modelid || 'Hue',
+      };
+    });
+  }
+
+  async sendCommand(id, patch) {
+    if (!this.connected) throw new Error('Hue Bridge is not connected');
+    const body = {};
+    if ('on' in patch) body.on = Boolean(patch.on);
+    if ('brightness' in patch && patch.on !== false) body.bri = Math.max(1, Math.min(254, Math.round(patch.brightness * 254)));
+    if ('temp' in patch && patch.temp && patch.on !== false) {
+      body.ct = Math.max(153, Math.min(500, Math.round(1_000_000 / patch.temp)));
+    }
+    await fetch(`http://${this.host}/api/${this.key}/lights/${id}/state`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+}
+
+const homeAssistant = new HomeAssistantService();
+const hue = new HueService();
+
+// ---------------------------------------------------------------------------
+// AI Access Gateway State
+// ---------------------------------------------------------------------------
+function primaryLanIp() {
+  const ifaces = govee.localInterfaces().filter((ip) => !ip.endsWith('.137.1') && !ip.endsWith('.56.1'));
+  return ifaces.find((ip) => ip.startsWith('192.168.') || ip.startsWith('10.')) || ifaces[0] || '127.0.0.1';
+}
+
+const aiGateway = {
+  state: 'off', // 'off' | 'live'
+  reach: 'local',
+  autoStop: '8h',
+  control: true,
+  edit: true,
+  token: null,
+  startedAt: null,
+  stopsAt: null,
+  activity: [],
+  previousPlan: null,
+  stopTimer: null,
+
+  statusPayload() {
+    const host = this.reach === 'local' ? `http://127.0.0.1:${PORT}` : `http://${primaryLanIp()}:${PORT}`;
+    const link = this.state === 'live' && this.token ? `${host}/agent/${this.token}` : null;
+    return {
+      state: this.state,
+      reach: this.reach,
+      autoStop: this.autoStop,
+      control: this.control,
+      edit: this.edit,
+      link,
+      mcp: link ? `${link}/mcp` : null,
+      startedAt: this.startedAt,
+      stopsAt: this.stopsAt,
+      activity: this.activity,
+      canUndo: Boolean(this.previousPlan),
+      tunnel: { installed: true },
+    };
+  },
+
+  log(client, title, ok = true, quiet = false) {
+    this.activity.push({ time: Date.now(), client: client || 'AI', title, ok, quiet });
+    if (this.activity.length > 80) this.activity.shift();
+    this.broadcast();
+  },
+
+  broadcast() {
+    broadcastSSE('incoming', { fn: 'agentStatus', args: [this.statusPayload()] });
+    broadcastSSE('incoming', { fn: 'agentLive', args: [this.state === 'live'] });
+  },
+
+  start(reach = this.reach) {
+    this.reach = reach || this.reach;
+    this.token = crypto.randomBytes(16).toString('base64url');
+    this.state = 'live';
+    this.startedAt = Date.now();
+    clearTimeout(this.stopTimer);
+    const hours = this.autoStop === '1h' ? 1 : this.autoStop === '8h' ? 8 : 0;
+    this.stopsAt = hours ? Date.now() + hours * 3600_000 : null;
+    if (hours) {
+      this.stopTimer = setTimeout(() => this.stop(), hours * 3600_000);
+    }
+    this.log('House Control', 'Link is live');
+  },
+
+  stop() {
+    clearTimeout(this.stopTimer);
+    if (this.state === 'live') {
+      this.state = 'off';
+      this.token = null;
+      this.stopsAt = null;
+      this.log('House Control', 'Stopped — the link no longer works');
+    } else {
+      this.broadcast();
+    }
+  },
+
+  updateSettings(patch) {
+    if ('reach' in patch && patch.reach) this.reach = patch.reach;
+    if ('control' in patch && patch.control != null) this.control = Boolean(patch.control);
+    if ('edit' in patch && patch.edit != null) this.edit = Boolean(patch.edit);
+    if ('autoStop' in patch && patch.autoStop) {
+      this.autoStop = patch.autoStop;
+      if (this.state === 'live') {
+        clearTimeout(this.stopTimer);
+        const hours = this.autoStop === '1h' ? 1 : this.autoStop === '8h' ? 8 : 0;
+        this.stopsAt = hours ? Date.now() + hours * 3600_000 : null;
+        if (hours) this.stopTimer = setTimeout(() => this.stop(), hours * 3600_000);
+      }
+    }
+    this.broadcast();
+  },
+
+  undoPlan() {
+    if (!this.previousPlan) return;
+    plans.saveCustom(this.previousPlan);
+    this.previousPlan = null;
+    this.log('House Control', 'Undid the last floor plan change');
+    broadcastSSE('reload', {});
+  },
+};
+
 function getServicesInfo() {
+  const tuyaSaved = readJSON(FILES.tuya, { configured: false, accessId: '', region: 'us' });
   return {
     govee: govee.info,
-    smartlife: { connected: false, userCode: '', account: '' },
-    homeassistant: { connected: false },
-    hue: { connected: false },
+    smartlife: { connected: Boolean(tuyaSaved.configured), userCode: '', account: tuyaSaved.configured ? 'Tuya Cloud' : '' },
+    homeassistant: homeAssistant.info,
+    hue: hue.info,
     homekit: { connected: false, remote: true },
   };
 }
@@ -746,11 +1138,27 @@ async function handleBridgeMessage(msg) {
     case 'services.info':
       return getServicesInfo();
 
+    case 'lan.info': {
+      const ip = primaryLanIp();
+      return {
+        ip,
+        panelUrl: `http://${ip}:5199/`,
+        mobileUrl: `http://${ip}:5199/?platform=ios`,
+        editorUrl: `http://${ip}:5199/?mode=editor`,
+      };
+    }
+
     case 'devices.all': {
       const devices = [];
       const errors = {};
       if (govee.enabled) {
         devices.push(...govee.listDevices());
+      }
+      if (homeAssistant.connected) {
+        try { devices.push(...await homeAssistant.listDevices()); } catch (e) { errors.homeassistant = e.message; }
+      }
+      if (hue.connected) {
+        try { devices.push(...await hue.listDevices()); } catch (e) { errors.hue = e.message; }
       }
       return { devices, errors };
     }
@@ -760,8 +1168,66 @@ async function handleBridgeMessage(msg) {
         const found = await govee.scan(1600);
         return { found, info: getServicesInfo() };
       }
+      if (msg.service === 'homeassistant') {
+        return { found: await homeAssistant.discover() };
+      }
+      if (msg.service === 'hue') {
+        return { found: await hue.discover() };
+      }
       return { found: [] };
     }
+
+    case 'homeassistant.connect': {
+      await homeAssistant.connect(msg.url, msg.token);
+      return getServicesInfo();
+    }
+
+    case 'hue.pair': {
+      const r = await hue.pair(msg);
+      if (r?.waiting) return { waiting: true };
+      return getServicesInfo();
+    }
+
+    case 'tuya.save': {
+      const prev = readJSON(FILES.tuya, {});
+      const accessId = String(msg.accessId || '').trim();
+      const accessSecret = String(msg.accessSecret || '').trim() || prev.accessSecret || '';
+      const region = msg.region || prev.region || 'us';
+      const configured = Boolean(accessId && accessSecret);
+      writeJSON(FILES.tuya, { configured, accessId, accessSecret, hasSecret: Boolean(accessSecret), region });
+      return { configured, accessId, hasSecret: Boolean(accessSecret), region };
+    }
+
+    case 'tuya.devices':
+      return { devices: [] };
+
+    case 'agent.start': {
+      aiGateway.start(msg.reach);
+      return aiGateway.statusPayload();
+    }
+
+    case 'agent.stop': {
+      aiGateway.stop();
+      return aiGateway.statusPayload();
+    }
+
+    case 'agent.settings': {
+      aiGateway.updateSettings(msg);
+      return aiGateway.statusPayload();
+    }
+
+    case 'agent.undo': {
+      aiGateway.undoPlan();
+      return aiGateway.statusPayload();
+    }
+
+    case 'agent.open': {
+      if (msg.url) execFile('cmd.exe', ['/c', 'start', '', msg.url]);
+      return { ok: true };
+    }
+
+    case 'agent.copy':
+      return { ok: true };
 
     case 'govee.scan': {
       const found = await govee.scan(1600);
@@ -798,6 +1264,8 @@ async function handleBridgeMessage(msg) {
 
     case 'service.disconnect': {
       if (msg.service === 'govee') govee.disconnect();
+      if (msg.service === 'homeassistant') homeAssistant.disconnect();
+      if (msg.service === 'hue') hue.disconnect();
       return getServicesInfo();
     }
 
@@ -808,6 +1276,14 @@ async function handleBridgeMessage(msg) {
       if (!link) return { ok: true };
       if (link.service === 'govee') {
         await govee.sendCommand(link.id, patch, state);
+        return { ok: true };
+      }
+      if (link.service === 'homeassistant') {
+        await homeAssistant.sendCommand(link.id, patch);
+        return { ok: true };
+      }
+      if (link.service === 'hue') {
+        await hue.sendCommand(link.id, patch);
         return { ok: true };
       }
       return { ok: true };
@@ -844,11 +1320,20 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === 'GET' && url.pathname === '/api/boot') {
+    const ip = primaryLanIp();
+    const tuyaSaved = readJSON(FILES.tuya, { configured: false, accessId: '', hasSecret: false, region: 'us' });
     const boot = {
       ...plans.bootPayload(),
       services: getServicesInfo(),
-      tuya: { configured: false, accessId: '', region: 'us' },
+      tuya: { configured: Boolean(tuyaSaved.configured), accessId: tuyaSaved.accessId || '', hasSecret: Boolean(tuyaSaved.hasSecret), region: tuyaSaved.region || 'us' },
       smartLife: { connected: false, userCode: '', account: '' },
+      agent: aiGateway.statusPayload(),
+      agentLive: aiGateway.state === 'live',
+      lan: {
+        ip,
+        panelUrl: `http://${ip}:5199/`,
+        mobileUrl: `http://${ip}:5199/?platform=ios`,
+      },
     };
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(boot));
@@ -907,6 +1392,82 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // AI Access Gateway HTTP endpoints (/agent/<token>...)
+  if (url.pathname.startsWith('/agent/')) {
+    const parts = url.pathname.slice('/agent/'.length).split('/').filter(Boolean);
+    const token = parts.shift();
+    if (aiGateway.state !== 'live' || !aiGateway.token || token !== aiGateway.token) {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('Not found');
+      return;
+    }
+    const base = `${url.protocol}//${url.host}/agent/${token}`;
+    const sub = parts.join('/');
+    const plan = plans.activePlan === 'custom' && plans.customPlan()
+      ? plans.customPlan()
+      : readJSON(path.join(ROOT_DIR, 'web', 'public', 'plans', 'home.json'), { name: 'Home', rooms: [], lights: [], acs: [], scenes: [] });
+
+    if (req.method === 'GET' && (!sub || sub === 'guide')) {
+      aiGateway.log('AI Assistant', 'Opened the AI Access guide', true, true);
+      const roomLines = (plan.rooms || []).map((r) => {
+        const ls = (plan.lights || []).filter((l) => l.room === r.id && !l.disabled);
+        return `### ${r.name} [${r.id}]\n` + (ls.length
+          ? ls.map((l) => `- ${l.name} [${l.id}]: on ${base}/do/light/${encodeURIComponent(l.id)}/on · off ${base}/do/light/${encodeURIComponent(l.id)}/off · 50% ${base}/do/light/${encodeURIComponent(l.id)}/brightness/50`).join('\n')
+          : '- No lights');
+      }).join('\n\n');
+      const text = `# House Control — ${plan.name || 'Home'}\n\n`
+        + `You are connected to the owner's live 3D home.\n\n`
+        + `## Action Links\n`
+        + `- All lights on: ${base}/do/all/lights/on\n`
+        + `- All lights off: ${base}/do/all/lights/off\n\n`
+        + `${roomLines}\n`;
+      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end(text);
+      return;
+    }
+
+    if (req.method === 'GET' && sub.startsWith('do/')) {
+      if (!aiGateway.control) {
+        res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end('Device control is disabled for this link.');
+        return;
+      }
+      const [, kind, id, action, val] = parts;
+      const decodedId = decodeURIComponent(id || '');
+      const patch = {};
+      if (action === 'on' || action === 'off') patch.on = action === 'on';
+      else if (action === 'brightness') { patch.on = true; patch.brightness = Math.max(0.05, Math.min(1, Number(val) / 100)); }
+      else if (action === 'kelvin') { patch.on = true; patch.temp = Number(val); patch.color = null; }
+      else if (action === 'color') { patch.on = true; patch.color = val.startsWith('#') ? val : `#${val}`; }
+
+      const lightsUpdate = {};
+      if (kind === 'all' && id === 'lights') {
+        const on = action === 'on';
+        for (const l of (plan.lights || []).filter((x) => !x.disabled)) {
+          lightsUpdate[l.id] = { on };
+          await handleBridgeMessage({ type: 'command', kind: 'light', id: l.id, patch: { on }, state: { on } }).catch(() => {});
+        }
+        aiGateway.log('AI Assistant', `Turned all lights ${on ? 'on' : 'off'}`);
+      } else if (kind === 'light' && decodedId) {
+        lightsUpdate[decodedId] = patch;
+        await handleBridgeMessage({ type: 'command', kind: 'light', id: decodedId, patch, state: patch }).catch(() => {});
+        aiGateway.log('AI Assistant', `Set ${decodedId}: ${JSON.stringify(patch)}`);
+      }
+      if (Object.keys(lightsUpdate).length) {
+        broadcastSSE('incoming', { fn: 'adopt', args: [{ lights: lightsUpdate, source: 'AI' }] });
+      }
+      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end(`Done: ${ JSON.stringify(lightsUpdate) }\n`);
+      return;
+    }
+
+    if (req.method === 'GET' && sub === 'plan.json') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(plan, null, 2));
+      return;
+    }
+  }
+
   if (fs.existsSync(DIST_DIR)) {
     let relPath = url.pathname === '/' ? '/index.html' : url.pathname;
     const filePath = path.join(DIST_DIR, path.normalize(relPath));
@@ -922,6 +1483,6 @@ const server = http.createServer(async (req, res) => {
   res.end('Not found');
 });
 
-server.listen(PORT, '127.0.0.1', () => {
-  logEvent(`House Control backend running at http://localhost:${PORT}`);
+server.listen(PORT, '0.0.0.0', () => {
+  logEvent(`House Control backend running at http://localhost:${PORT} (LAN: http://${primaryLanIp()}:${PORT})`);
 });

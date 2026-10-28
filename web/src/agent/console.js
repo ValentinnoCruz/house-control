@@ -28,17 +28,19 @@ export function bootConsole(root) {
 
   /* ---------- skeleton ---------- */
 
-  // The ring is four still gradients stacked under the core; their opacities drift, so the colours
-  // seem to flow around it. Only opacity animates: WebKit composites it without repainting.
   const orb = h('div.orb', h('div.orb-glow'),
     h('div.orb-ring', h('i.c1'), h('i.c2'), h('i.c3'), h('i.dim')),
     h('div.orb-core', icon('sparkles', 30, 1.8)));
   const pill = h('div.pill');
   const primary = h('button.primary', { onclick: () => send(status.state === 'live' || status.state === 'starting' ? 'agent.stop' : 'agent.start', { reach: status.reach }) });
-  const reachSeg = segmented([['internet', 'globe', 'Over the internet'], ['local', 'laptop', 'This Mac only']],
+  const reachSeg = segmented([['internet', 'globe', 'Home Wi-Fi / LAN'], ['local', 'laptop', 'This PC only']],
     (v) => send('agent.settings', { reach: v }));
   const callout = h('div.callout');
-  const hero = h('header.hero', orb,
+  const backBtn = h('button.ghost', {
+    style: { alignSelf: 'flex-start', marginBottom: '8px' },
+    onclick: () => { location.href = location.pathname; },
+  }, icon('back', 14), 'Back to 3D Control Panel');
+  const hero = h('header.hero', backBtn, orb,
     h('h1', 'AI Access'),
     h('p.lede', 'Let ChatGPT, Claude or any AI assistant see and run your home — through a private link that lives only as long as you want it to.'),
     pill, primary, reachSeg.el, callout);
@@ -74,10 +76,10 @@ export function bootConsole(root) {
   const footer = h('footer.privacy',
     h('div.privacy-title', icon('shield', 15), 'Private by design'),
     h('ul',
-      h('li', 'Runs on this Mac. No House Control server, no account, nothing stored anywhere else.'),
+      h('li', 'Runs locally on this computer. No external server, no account, nothing stored anywhere else.'),
       h('li', 'The link holds a 128-bit secret. Without it every address answers “not found”.'),
       h('li', 'Stop ends it at once — the address itself stops existing. Each start makes a new one.'),
-      h('li', 'Device IDs and sign-ins never leave the Mac. Cloudflare only relays the encrypted connection.')));
+      h('li', 'Device IDs and sign-ins never leave your computer.')));
 
   const page = h('div.agent', hero, linkCard, connectCard, permsCard, activityCard, footer);
   root.replaceChildren(page);
@@ -121,8 +123,8 @@ export function bootConsole(root) {
 
   function copy(text) {
     if (!text) return;
+    navigator.clipboard?.writeText(text).catch(() => {});
     if (isNative) post('agent.copy', { text });
-    else navigator.clipboard?.writeText(text).catch(() => {});
   }
 
   function chatPrompt() {
@@ -199,7 +201,6 @@ export function bootConsole(root) {
   let shownLocal = null;
   function renderFeed() {
     const entries = (status.activity || []).slice().reverse();
-    // Reads ("Looked at the home") are folded into the action that follows them.
     const visible = entries.filter((e, i) => !e.quiet || i === 0 || !entries[i - 1] || entries[i - 1].client !== e.client).slice(0, 40);
     if (!visible.length) {
       feed.replaceChildren(h('li.empty', icon('sparkles', 16), h('span', status.state === 'live'
@@ -224,11 +225,11 @@ export function bootConsole(root) {
     const s = status.state;
     page.dataset.state = s;
     const label = {
-      off: 'Off', starting: status.reach === 'local' ? 'Starting…' : 'Opening a private tunnel…',
+      off: 'Off', starting: status.reach === 'local' ? 'Starting…' : 'Opening link…',
       live: status.stopsAt ? `Live · ${left(status.stopsAt)}` : 'Live',
       error: 'Stopped', setup: 'One-time setup',
     }[s] || s;
-    pill.replaceChildren(h('i.dot'), h('span', label), ...(s === 'live' ? [h('span.pill-reach', status.reach === 'local' ? 'This Mac' : 'Internet')] : []));
+    pill.replaceChildren(h('i.dot'), h('span', label), ...(s === 'live' ? [h('span.pill-reach', status.reach === 'local' ? 'This PC' : 'Home Wi-Fi')] : []));
     primary.replaceChildren(...(s === 'live' ? [icon('stop', 15, 2.4), 'Stop AI Access'] : s === 'starting' ? [h('i.spinner'), 'Cancel'] : [icon('sparkles', 17, 2), 'Start AI Access']));
     primary.classList.toggle('stop', s === 'live' || s === 'starting');
     reachSeg.set(status.reach);
@@ -239,12 +240,11 @@ export function bootConsole(root) {
       callout.className = 'callout info';
       callout.replaceChildren(...[
         h('div.callout-title', icon('download', 15), 'Get Cloudflare’s tunnel once'),
-        h('p', 'Over the internet, your Mac is reached through Cloudflare’s free quick tunnel (', h('code.inline', 'cloudflared'), ', about 20 MB, from Cloudflare’s GitHub). No Cloudflare account is needed.'),
+        h('p', 'Over the internet, your computer is reached through Cloudflare’s free quick tunnel (', h('code.inline', 'cloudflared'), ', about 20 MB, from Cloudflare’s GitHub). No Cloudflare account is needed.'),
         t.error ? h('p.err', t.error) : null,
         h('div.callout-actions',
           h('button.primary.small', { disabled: t.downloading || null, onclick: () => send('agent.install') }, t.downloading ? [h('i.spinner'), 'Downloading…'] : [icon('download', 14), 'Download']),
-          h('button.ghost', { onclick: () => send('agent.start', { reach: 'local' }) }, 'Use this Mac only')),
-        h('p.muted', 'Or in Terminal: ', h('code.inline', 'brew install cloudflared'))].filter(Boolean));
+          h('button.ghost', { onclick: () => send('agent.start', { reach: 'local' }) }, 'Use this PC only'))].filter(Boolean));
     } else if (s === 'error') {
       callout.className = 'callout bad';
       callout.replaceChildren(h('div.callout-title', icon('close', 15), 'AI Access stopped'), h('p', status.error || 'Something went wrong.'));
@@ -256,20 +256,20 @@ export function bootConsole(root) {
     linkCard.classList.toggle('hidden', s !== 'live');
     const local = status.reach === 'local';
     if (local !== shownLocal) {
-      // Assistants in the cloud cannot reach 127.0.0.1: on this Mac only, apps on the Mac are the audience.
       shownLocal = local;
       if (local && tab === 'chat') tab = 'code';
       if (!local && tab === 'code' && s !== 'live') tab = 'chat';
     }
     chatActions.firstChild.hidden = local;
     linkHint.replaceChildren(...(local
-      ? ['Only apps on this Mac can open it: Claude Code, Cursor, VS Code, LM Studio, your own scripts. See ', h('b', 'Code & agents'), ' below.']
+      ? ['Only apps on this PC can open it: Claude Code, Cursor, VS Code, LM Studio, your own scripts. See ', h('b', 'Code & agents'), ' below.']
       : ['Paste it into any assistant with your request — ', h('em', '“turn off every light except the bedroom”'), '.']));
-    if (s === 'live') {
+    if (s === 'live' && status.link) {
       try {
         const u = new URL(status.link);
-        const [token] = u.pathname.slice(1).split('/');
-        urlText.replaceChildren(h('span.url-host', u.host), h('span.url-token', `/${token.slice(0, 5)}…`));
+        const segs = u.pathname.split('/').filter(Boolean);
+        const token = segs[segs.length - 1] || '';
+        urlText.replaceChildren(h('span.url-host', u.host), h('span.url-token', `/agent/${token.slice(0, 6)}…`));
       } catch { urlText.textContent = status.link; }
     }
     controlToggle.set(status.control !== false);
@@ -287,7 +287,6 @@ export function bootConsole(root) {
   window.__agent = { get status() { return status; }, set status(s) { status = s; render(); }, render };
 }
 
-// In a browser there is no native side: play its part, so the page can be designed and filmed.
 function fakeNative(update) {
   let s = { state: 'off', reach: 'internet', autoStop: '8h', control: true, edit: true, activity: [], canUndo: false, tunnel: { installed: true } };
   const set = (patch) => { s = { ...s, ...patch }; update(s); };
@@ -296,11 +295,11 @@ function fakeNative(update) {
     if (type === 'agent.start') {
       set({ state: 'starting', reach: payload.reach || s.reach });
       setTimeout(() => {
-        const base = s.reach === 'local' ? 'http://127.0.0.1:7419' : 'https://quiet-harbor-lamp-meadow.trycloudflare.com';
-        const link = `${base}/k3VbQ9mX2pLr8tNw4yHc0A`;
+        const base = s.reach === 'local' ? 'http://127.0.0.1:5200' : 'https://quiet-harbor-lamp-meadow.trycloudflare.com';
+        const link = `${base}/agent/k3VbQ9mX2pLr8tNw4yHc0A`;
         set({ state: 'live', link, mcp: `${link}/mcp`, startedAt: Date.now(), stopsAt: s.autoStop === 'never' ? null : Date.now() + (s.autoStop === '1h' ? 1 : 8) * 3600e3 });
         log('House Control', 'Link is live');
-      }, 1600);
+      }, 600);
     } else if (type === 'agent.stop') {
       if (s.state === 'live') log('House Control', 'Stopped — the link no longer works');
       set({ state: 'off', link: null, mcp: null });

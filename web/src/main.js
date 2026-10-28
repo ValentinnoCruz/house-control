@@ -65,8 +65,10 @@ async function boot() {
     onFocus: (target) => world?.focus(target),
     onMenu: (anchor, reason) => {
       if (reason === 'escape') post('close');
-      else if (reason === 'agent') post('openAgent');
-      else if (isPhone) post('openSettings'); // plans, sync and sign-in are native screens there
+      else if (reason === 'agent') {
+        if (isWebBackend) location.href = `${location.pathname}?mode=agent`;
+        else post('openAgent');
+      } else if (isPhone) post('openSettings'); // plans, sync and sign-in are native screens there
       else planMenu(anchor);
     },
   });
@@ -158,13 +160,33 @@ async function boot() {
       });
     }
     items.push('-',
-      { label: 'Edit Floor Plan (2D Editor)…', action: () => { location.href = `${location.pathname}?mode=editor`; } },
-      { label: 'Govee LAN + Cloud Connections…', action: () => { location.href = `${location.pathname}?mode=editor&section=service:govee`; } },
+      { label: 'Edit Home (2D & 3D Floor Plan Editor)…', action: () => { location.href = `${location.pathname}?mode=editor`; } },
+      { label: 'Load Floor Plan File (.json)…', action: () => {
+        const input = h('input', { type: 'file', accept: 'application/json,.json' });
+        input.addEventListener('change', async () => {
+          try {
+            const json = JSON.parse(await input.files[0].text());
+            normalize(structuredClone(json));
+            await post('savePlan', { config: json });
+            panel.toast('Floor plan loaded and applied');
+          } catch (e) {
+            panel.toast(`Could not load plan: ${e.message}`);
+          }
+        });
+        input.click();
+      } },
+      { label: 'Connections (Govee, Home Assistant, Hue)…', action: () => { location.href = `${location.pathname}?mode=editor&section=connections`; } },
       { label: 'Show Dynamic Island View…', action: () => { location.href = `${location.pathname}?mode=island&expanded=1`; } },
+      { label: 'Pair Phone / Copy Home Wi-Fi Link…', action: () => {
+        const lanUrl = window.__HOUSE_BOOT__?.lan?.panelUrl || `http://${location.hostname}:5199/`;
+        navigator.clipboard?.writeText(lanUrl).catch(() => {});
+        panel.toast(`Copied phone Wi-Fi link: ${lanUrl}`);
+      } },
       { label: 'iPhone / Mobile View…', action: () => { location.href = `${location.pathname}?platform=ios`; } },
       { label: 'AI Access…', action: () => { location.href = `${location.pathname}?mode=agent`; } },
       { label: 'Reveal Plan File in Explorer', action: () => post('revealPlan') },
-      { label: 'Reveal Device Log in Explorer', action: () => post('revealLog') });
+      { label: 'Reveal Device Log in Explorer', action: () => post('revealLog') },
+      { label: 'Reload', action: () => location.reload() });
     openMenu(panel.anchorMenu, anchor, items);
   }
 

@@ -10,7 +10,7 @@ import { h, clamp } from '../ui/dom.js';
 import { icon } from '../ui/icons.js';
 import { lightColor } from '../three/lights.js';
 import { MODE_COLORS } from '../three/ac.js';
-import { post, incoming, isNative } from '../bridge.js';
+import { post, incoming, isNative, isWebBackend } from '../bridge.js';
 
 const MODE_LABEL = { cool: 'Cool', heat: 'Heat', dry: 'Dry', fan: 'Fan', auto: 'Auto' };
 const NAVY = new THREE.Color('#17274f');
@@ -21,7 +21,6 @@ const PEEK_MS = 2400;
 export async function bootIsland(root) {
   const boot = window.__HOUSE_BOOT__?.island || {};
   const query = new URLSearchParams(location.search);
-  // The notch this island grows out of, in points. A screen without one gets a drawn tab.
   const notch = {
     w: boot.notchWidth ?? (Number(query.get('notch')) || 190),
     h: boot.notchHeight ?? 34,
@@ -59,7 +58,34 @@ export async function bootIsland(root) {
   isle.classList.toggle('real', notch.real);
   isle.style.setProperty('--notch-w', `${notch.w}px`);
   isle.style.setProperty('--notch-h', `${notch.h}px`);
-  root.replaceChildren(isle);
+
+  const backBar = (!isNative || isWebBackend)
+    ? h('div', {
+      style: {
+        position: 'fixed', bottom: '24px', left: '50%', transform: 'translateX(-50%)',
+        display: 'flex', gap: '10px', zIndex: '100',
+      },
+    },
+      h('button', {
+        style: {
+          height: '36px', padding: '0 16px', borderRadius: '999px',
+          background: 'rgba(20, 28, 48, 0.9)', border: '1px solid rgba(255,255,255,0.16)',
+          color: '#fff', fontSize: '13px', fontWeight: '600', cursor: 'pointer',
+          display: 'inline-flex', alignItems: 'center', gap: '8px',
+        },
+        onclick: () => { location.href = location.pathname; },
+      }, icon('back', 15), 'Back to 3D Control Panel'),
+      h('button', {
+        style: {
+          height: '36px', padding: '0 16px', borderRadius: '999px',
+          background: 'rgba(255, 255, 255, 0.1)', border: '1px solid rgba(255,255,255,0.16)',
+          color: '#cfe0ff', fontSize: '13px', fontWeight: '600', cursor: 'pointer',
+        },
+        onclick: () => setState(isle.dataset.state === 'expanded' ? 'collapsed' : 'expanded'),
+      }, 'Toggle Island Open / Closed'))
+    : null;
+
+  root.replaceChildren(...[isle, backBar].filter(Boolean));
 
   /* ---------- scenes ---------- */
 
@@ -106,7 +132,6 @@ export async function bootIsland(root) {
       h('span.chip-bubble', icon(cfg.capabilities.length ? cfg.type : 'plug', 15)),
       h('div.chip-text', h('div.chip-name', cfg.name), sub),
       h('i.chip-level'));
-    // Click toggles, dragging sideways dims: the same gesture as the panel's tiles.
     let gesture = null;
     el.addEventListener('pointerdown', (ev) => {
       if (ev.button !== 0) return;
@@ -179,7 +204,7 @@ export async function bootIsland(root) {
     world.setInsets(0, 0);
     new ResizeObserver(() => world.resize()).observe(canvas);
   } catch (error) {
-    console.error(error); // no WebGL: the island still works as a remote
+    console.error(error);
   }
 
   /* ---------- what it shows ---------- */
@@ -202,7 +227,7 @@ export async function bootIsland(root) {
 
   const plainEar = (iconName, text, color) => [h('span.ear-icon', { vars: { '--c': color } }, icon(iconName, 14, 2.2)), text != null ? h('span.ear-text', text) : null];
 
-  let peek = null; // { left: [...nodes], right: text } while something is being announced
+  let peek = null;
 
   function update() {
     const lights = Object.values(state.lights);
@@ -242,22 +267,17 @@ export async function bootIsland(root) {
       clearTimeout(peekTimer);
       peek = null;
       world?.setRunning(true);
-      // The model sweeps in and its lamps come on once the island has room for it, so
-      // the first frames of the spring do not have to wait for the 3D renderer.
-      // (With Reduce Motion the camera does not sweep: the model is simply there.)
       if (was !== 'expanded' && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
         clearTimeout(introTimer);
         introTimer = setTimeout(() => world?.intro(), 110);
       }
     } else if (was === 'expanded') {
-      // Keep drawing while the island closes over the model, then rest.
       setTimeout(() => { if (isle.dataset.state !== 'expanded') world?.setRunning(false); }, 500);
       if (focused) { focused = null; world?.focus(null); }
     }
     update();
   }
 
-  // Says what just changed somewhere else, unless the island is open (then you see it anyway).
   function announce(before, source) {
     if (isle.dataset.state === 'expanded') return;
     const news = describe(before, source);
@@ -269,7 +289,6 @@ export async function bootIsland(root) {
     peekTimer = setTimeout(() => { peek = null; if (isle.dataset.state === 'peek') setState('collapsed'); }, PEEK_MS);
   }
 
-  // A change an AI assistant made (AI Access) wears its sparkles instead of the device's icon.
   function describe(before, source) {
     const ear = (iconName, text, color) => (source ? plainEar('sparkles', text, '#c3b2ff') : plainEar(iconName, text, color));
     if (state.scene && state.scene !== before.scene) {
@@ -313,7 +332,6 @@ export async function bootIsland(root) {
   incoming.adopt = (other) => store.adopt(other);
   incoming.applyRemote = (remote) => store.applyRemote(remote);
 
-  // The order the parts of the open island come in: header, model, scenes, devices.
   const stagger = (el, ms) => { el.classList.add('reveal'); el.style.setProperty('--d', `${Math.round(ms)}ms`); };
   stagger(body.querySelector('.isle-head'), 60);
   stagger(body.querySelector('.isle-stage'), 90);
@@ -323,8 +341,7 @@ export async function bootIsland(root) {
   body.inert = true;
   update();
   if (window.__HOUSE_BOOT__?.island?.expanded || query.get('expanded')) setState('expanded');
-  // Without the native shell (vite dev) the pointer drives it, so the page can be worked on.
-  if (!isNative) {
+  if (!isNative || isWebBackend) {
     shape.addEventListener('pointerenter', () => setState('expanded'));
     shape.addEventListener('pointerleave', () => setState('collapsed'));
   }
