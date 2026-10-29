@@ -14,11 +14,12 @@
       "name": "Garage",
       "rect": [
         0,
-        0,
+        -0.05,
         5.95,
         8.85
       ],
-      "floor": "stone"
+      "floor": "stone",
+      "locked": true
     },
     {
       "id": "entry",
@@ -29,7 +30,7 @@
         1.75,
         2.3
       ],
-      "floor": "oak"
+      "floor": "tile"
     },
     {
       "id": "kitchen",
@@ -37,21 +38,22 @@
       "rect": [
         0,
         8.85,
-        3.45,
-        1.8
+        3.5,
+        2.5
       ],
-      "floor": "tile"
+      "floor": "tile",
+      "locked": true
     },
     {
       "id": "dining",
       "name": "Dining Room",
       "rect": [
         0,
-        10.65,
-        3.45,
-        3
+        11.35,
+        3.5,
+        2.3
       ],
-      "floor": "oak"
+      "floor": "tile"
     },
     {
       "id": "living",
@@ -62,7 +64,8 @@
         4.25,
         4.8
       ],
-      "floor": "oak"
+      "floor": "tile",
+      "locked": false
     },
     {
       "id": "restroom",
@@ -84,7 +87,7 @@
         3.9,
         3.55
       ],
-      "floor": "walnut"
+      "floor": "rug"
     },
     {
       "id": "hallway",
@@ -95,7 +98,7 @@
         2.7,
         1.55
       ],
-      "floor": "oak"
+      "floor": "tile"
     },
     {
       "id": "closet2",
@@ -106,7 +109,7 @@
         2.85,
         0.78
       ],
-      "floor": "walnut"
+      "floor": "rug"
     },
     {
       "id": "closet3",
@@ -117,7 +120,7 @@
         2.85,
         0.77
       ],
-      "floor": "walnut"
+      "floor": "rug"
     },
     {
       "id": "closet1",
@@ -128,7 +131,7 @@
         1.65,
         0.8
       ],
-      "floor": "oak"
+      "floor": "tile"
     },
     {
       "id": "bathroom",
@@ -150,31 +153,33 @@
         3.9,
         4.5
       ],
-      "floor": "walnut"
+      "floor": "rug"
     }
   ],
   "openings": [
     {
       "type": "open",
       "from": [
-        0.1,
-        10.65
+        0.8,
+        11.35
       ],
       "to": [
-        2.65,
-        10.65
-      ]
+        2.6,
+        11.35
+      ],
+      "locked": false
     },
     {
       "type": "open",
       "from": [
         3.45,
-        10.65
+        11.4
       ],
       "to": [
         3.45,
-        13.65
-      ]
+        13.7
+      ],
+      "locked": false
     },
     {
       "type": "open",
@@ -185,18 +190,20 @@
       "to": [
         7.7,
         8.85
-      ]
+      ],
+      "locked": false
     },
     {
       "type": "open",
       "from": [
         7.7,
-        8.2
+        8.4
       ],
       "to": [
         7.7,
         9.15
-      ]
+      ],
+      "locked": false
     },
     {
       "type": "door",
@@ -208,7 +215,8 @@
         5.1,
         0
       ],
-      "head": 2.2
+      "head": 2.2,
+      "locked": false
     },
     {
       "type": "door",
@@ -220,7 +228,8 @@
         0,
         6.6
       ],
-      "head": 2.05
+      "head": 2.05,
+      "locked": false
     },
     {
       "type": "door",
@@ -232,7 +241,8 @@
         5.95,
         7.6
       ],
-      "head": 2.05
+      "head": 2.05,
+      "locked": false
     },
     {
       "type": "door",
@@ -244,7 +254,8 @@
         7.35,
         6.55
       ],
-      "head": 2.05
+      "head": 2.05,
+      "locked": false
     },
     {
       "type": "door",
@@ -256,7 +267,8 @@
         9.3,
         7.6
       ],
-      "head": 2.05
+      "head": 2.05,
+      "locked": false
     },
     {
       "type": "door",
@@ -268,7 +280,8 @@
         10.35,
         7.6
       ],
-      "head": 2.05
+      "head": 2.05,
+      "locked": false
     },
     {
       "type": "door",
@@ -280,7 +293,8 @@
         12.45,
         7.6
       ],
-      "head": 2.05
+      "head": 2.05,
+      "locked": false
     },
     {
       "type": "door",
@@ -292,7 +306,8 @@
         8.95,
         9.15
       ],
-      "head": 2.05
+      "head": 2.05,
+      "locked": false
     },
     {
       "type": "door",
@@ -304,7 +319,8 @@
         10.35,
         9.15
       ],
-      "head": 2.05
+      "head": 2.05,
+      "locked": false
     },
     {
       "type": "door",
@@ -316,7 +332,8 @@
         12.45,
         9.15
       ],
-      "head": 2.05
+      "head": 2.05,
+      "locked": false
     },
     {
       "type": "door",
@@ -328,7 +345,8 @@
         9.35,
         10.75
       ],
-      "head": 2.05
+      "head": 2.05,
+      "locked": false
     },
     {
       "type": "door",
@@ -340,7 +358,8 @@
         2.65,
         13.65
       ],
-      "head": 2.1
+      "head": 2.1,
+      "locked": false
     },
     {
       "type": "door",
@@ -352,20 +371,22 @@
         12.3,
         13.65
       ],
-      "head": 2.1
+      "head": 2.1,
+      "locked": false
     },
     {
       "type": "window",
       "from": [
         0,
-        9.35
+        9.65
       ],
       "to": [
         0,
-        10.15
+        10.45
       ],
       "sill": 0.9,
-      "head": 2.1
+      "head": 2.1,
+      "locked": false
     },
     {
       "type": "window",
@@ -378,7 +399,8 @@
         13.65
       ],
       "sill": 0.85,
-      "head": 2.1
+      "head": 2.1,
+      "locked": false
     },
     {
       "type": "window",
@@ -391,7 +413,8 @@
         13.65
       ],
       "sill": 0.85,
-      "head": 2.1
+      "head": 2.1,
+      "locked": false
     },
     {
       "type": "window",
@@ -404,7 +427,8 @@
         13.65
       ],
       "sill": 0.9,
-      "head": 2.1
+      "head": 2.1,
+      "locked": false
     },
     {
       "type": "window",
@@ -417,7 +441,8 @@
         13.65
       ],
       "sill": 0.9,
-      "head": 2.1
+      "head": 2.1,
+      "locked": false
     },
     {
       "type": "window",
@@ -430,56 +455,74 @@
         4.05
       ],
       "sill": 0.9,
-      "head": 2.1
+      "head": 2.1,
+      "locked": false
+    },
+    {
+      "type": "window",
+      "from": [
+        7.7,
+        5.6
+      ],
+      "to": [
+        7.7,
+        4.8
+      ],
+      "sill": 1.4
     }
   ],
   "furniture": [
     {
       "type": "washer",
       "pos": [
-        0.95,
-        8.4
+        4.25,
+        8.45
       ],
       "rot": 180,
-      "width": 0.65
+      "width": 0.65,
+      "locked": false
     },
     {
       "type": "washer",
       "pos": [
-        1.7,
-        8.4
+        4.95,
+        8.45
       ],
       "rot": 180,
-      "width": 0.65
+      "width": 0.65,
+      "locked": false
     },
     {
       "type": "kitchen",
       "pos": [
-        1.75,
-        9.2
+        1.7,
+        9.25
       ],
       "rot": 0,
-      "width": 3.1,
-      "upper": true
+      "width": 3.3,
+      "upper": true,
+      "locked": false
     },
     {
       "type": "fridge",
       "pos": [
-        0.42,
-        11.2
+        2.97,
+        10.95
       ],
-      "rot": 90
+      "rot": -90,
+      "locked": false
     },
     {
       "type": "roundDiningSet",
       "pos": [
-        1.85,
-        12.25
+        1.6,
+        12.75
       ],
       "rot": 0,
-      "width": 1.25,
+      "width": 0.7,
       "chairs": 4,
-      "color": "#383330"
+      "color": "#383330",
+      "locked": false
     },
     {
       "type": "chimney",
@@ -489,57 +532,64 @@
       ],
       "rot": 180,
       "width": 1.4,
-      "depth": 0.55
+      "depth": 0.55,
+      "locked": false
     },
     {
       "type": "rug",
       "pos": [
-        5.5,
-        11.1
+        4.7,
+        10.4
       ],
       "size": [
         2.8,
         2.2
       ],
-      "color": "#3b4a66"
+      "color": "#3b4a66",
+      "rot": 90,
+      "locked": false
     },
     {
       "type": "loveseatLeft",
       "pos": [
-        5.05,
-        9.85
+        4,
+        10.85
       ],
-      "rot": 0,
+      "rot": 90,
       "width": 1.5,
-      "color": "#8b93a7"
+      "color": "#8b93a7",
+      "locked": false
     },
     {
       "type": "chaiseRight",
       "pos": [
-        6.28,
-        10.2
+        4.38,
+        9.55
       ],
-      "rot": 0,
+      "rot": 90,
       "width": 0.95,
-      "color": "#8b93a7"
+      "color": "#8b93a7",
+      "locked": false
     },
     {
-      "type": "coffeeTable",
+      "type": "nightstand",
       "pos": [
-        5.5,
-        11.05
+        7.4,
+        10.4
       ],
-      "rot": 0,
-      "width": 1.2
+      "rot": -90,
+      "width": 1.2,
+      "locked": false
     },
     {
       "type": "tv",
       "pos": [
-        3.8,
-        11.1
+        7.4,
+        11.55
       ],
-      "rot": 90,
-      "width": 1.6
+      "rot": -90,
+      "width": 1.6,
+      "locked": false
     },
     {
       "type": "plant",
@@ -547,68 +597,77 @@
         3.9,
         13.15
       ],
-      "height": 1.5
+      "height": 1.5,
+      "locked": false
     },
     {
-      "type": "vanity",
+      "type": "tubShower",
       "pos": [
-        8.5,
-        4.4
+        8.525,
+        4.46
       ],
-      "rot": 0,
-      "width": 0.9
+      "rot": -180,
+      "width": 1.55,
+      "locked": false,
+      "depth": 0.7
     },
     {
       "type": "toilet",
       "pos": [
         8.1,
-        6.2
+        5.1
       ],
-      "rot": 90
+      "rot": 90,
+      "locked": false
     },
     {
       "type": "desk",
       "pos": [
-        11.3,
-        4.65
+        12.3,
+        4.45
       ],
       "rot": 0,
-      "width": 1.6
+      "width": 1.6,
+      "locked": false
     },
     {
       "type": "bookshelf",
       "pos": [
-        12.95,
-        5.8
+        9.9,
+        4.3
       ],
-      "rot": -90,
-      "width": 1.4,
-      "height": 1.8
+      "rot": 0,
+      "width": 0.65,
+      "height": 1.8,
+      "locked": false
     },
     {
       "type": "vanity",
       "pos": [
-        8.1,
-        11.3
+        8.05,
+        11.2
       ],
       "rot": 90,
-      "width": 1
+      "width": 2.25,
+      "locked": false
     },
     {
       "type": "toilet",
       "pos": [
         8.1,
-        12.4
+        12.6
       ],
-      "rot": 90
+      "rot": 90,
+      "locked": false
     },
     {
-      "type": "bathtub",
+      "type": "tubShower",
       "pos": [
-        8.52,
-        13.2
+        8.55,
+        13.3
       ],
-      "rot": 0
+      "rot": -180,
+      "locked": false
     },
     {
       "type": "bed",
@@ -618,7 +677,8 @@
       ],
       "rot": -90,
       "width": 1.7,
-      "color": "#7f8fb5"
+      "color": "#7f8fb5",
+      "locked": false
     },
     {
       "type": "nightstand",
@@ -626,7 +686,8 @@
         12.95,
         10.2
       ],
-      "rot": -90
+      "rot": -90,
+      "locked": false
     },
     {
       "type": "nightstand",
@@ -634,7 +695,8 @@
         12.95,
         12.6
       ],
-      "rot": -90
+      "rot": -90,
+      "locked": false
     },
     {
       "type": "rug",
@@ -646,27 +708,87 @@
         2.2,
         2.6
       ],
-      "color": "#6a5a52"
+      "color": "#6a5a52",
+      "locked": false
+    },
+    {
+      "type": "nightstand",
+      "pos": [
+        7.375,
+        12.725
+      ],
+      "rot": -90,
+      "locked": false
     },
     {
       "type": "pantry",
       "pos": [
         0.42,
-        11.95
+        11.9
       ],
       "rot": 90,
       "width": 0.7,
-      "color": "#e4e1da"
+      "color": "#e4e1da",
+      "locked": false
     },
     {
       "type": "coffeeBar",
       "pos": [
-        3.15,
-        11.35
+        0.3,
+        12.95
+      ],
+      "rot": -270,
+      "width": 1.2,
+      "color": "#2c3e66",
+      "locked": false
+    },
+    {
+      "type": "kitchen",
+      "pos": [
+        0.375,
+        10.425
+      ],
+      "rot": 90,
+      "width": 1.7,
+      "locked": false
+    },
+    {
+      "type": "kitchen",
+      "pos": [
+        3.025,
+        10.075
       ],
       "rot": -90,
-      "width": 1.2,
-      "color": "#2c3e66"
+      "width": 1,
+      "locked": false
+    },
+    {
+      "type": "vanity",
+      "pos": [
+        8.025,
+        6.575
+      ],
+      "rot": 90,
+      "width": 1.8,
+      "locked": false
+    },
+    {
+      "type": "pantry",
+      "pos": [
+        8.125,
+        8.025
+      ],
+      "rot": 90,
+      "locked": false
+    },
+    {
+      "type": "tv",
+      "pos": [
+        9.55,
+        12.1
+      ],
+      "rot": 90,
+      "locked": false
     }
   ],
   "lights": [
@@ -687,16 +809,17 @@
       "link": {
         "service": "govee",
         "id": "33:1E:98:17:3C:97:DB:2E"
-      }
+      },
+      "locked": true
     },
     {
       "id": "garage.washer",
       "name": "Garage-1-washer",
       "room": "garage",
-      "type": "spots",
+      "type": "ceiling",
       "pos": [
-        1.35,
-        7.9
+        4.6,
+        8.4
       ],
       "capabilities": [
         "brightness",
@@ -706,16 +829,17 @@
       "link": {
         "service": "govee",
         "id": "6B:12:98:17:3C:3D:A3:42"
-      }
+      },
+      "locked": true
     },
     {
       "id": "garage.light2",
       "name": "Garage 2",
       "room": "garage",
-      "type": "spots",
+      "type": "ceiling",
       "pos": [
-        4.5,
-        7.9
+        5.55,
+        3.75
       ],
       "capabilities": [
         "brightness",
@@ -725,16 +849,17 @@
       "link": {
         "service": "govee",
         "id": "60:B7:98:17:3C:3C:36:D8"
-      }
+      },
+      "locked": true
     },
     {
       "id": "living.light1",
       "name": "Living room 1",
       "room": "living",
-      "type": "ceiling",
+      "type": "table",
       "pos": [
-        4.65,
-        10.5
+        7.4,
+        10.4
       ],
       "capabilities": [
         "brightness",
@@ -744,16 +869,17 @@
       "link": {
         "service": "govee",
         "id": "5A:66:98:17:3C:7B:AF:94"
-      }
+      },
+      "locked": true
     },
     {
       "id": "living.light2",
       "name": "Living room 2",
       "room": "living",
-      "type": "ceiling",
+      "type": "table",
       "pos": [
-        6.45,
-        10.5
+        7.4,
+        12.7
       ],
       "capabilities": [
         "brightness",
@@ -763,7 +889,8 @@
       "link": {
         "service": "govee",
         "id": "C0:6B:98:17:3C:91:BB:A6"
-      }
+      },
+      "locked": true
     },
     {
       "id": "living.tv",
@@ -771,11 +898,11 @@
       "room": "living",
       "type": "strip",
       "pos": [
-        3.62,
-        11.1
+        7.42,
+        11.55
       ],
-      "y": 1.05,
-      "rot": 90,
+      "y": 0.8,
+      "rot": -90,
       "length": 1.5,
       "capabilities": [
         "brightness",
@@ -786,7 +913,8 @@
       "link": {
         "service": "govee",
         "id": "7D:F6:D2:2D:44:46:22:39"
-      }
+      },
+      "locked": true
     },
     {
       "id": "living.xmas",
@@ -794,8 +922,8 @@
       "room": "living",
       "type": "floor",
       "pos": [
-        3.9,
-        13.15
+        7.15,
+        13.3
       ],
       "capabilities": [
         "brightness",
@@ -805,7 +933,8 @@
       "link": {
         "service": "govee",
         "id": "11:94:C5:09:26:1A:37:3F"
-      }
+      },
+      "locked": true
     },
     {
       "id": "office.light1",
@@ -824,7 +953,8 @@
       "link": {
         "service": "govee",
         "id": "F7:E5:98:17:3C:A2:F6:66"
-      }
+      },
+      "locked": true
     },
     {
       "id": "office.light2",
@@ -843,7 +973,8 @@
       "link": {
         "service": "govee",
         "id": "93:A2:98:17:3C:A1:53:5A"
-      }
+      },
+      "locked": true
     },
     {
       "id": "office.light3",
@@ -862,30 +993,8 @@
       "link": {
         "service": "govee",
         "id": "7A:13:98:17:3C:A4:1C:DC"
-      }
-    },
-    {
-      "id": "office.rope",
-      "name": "Office rope light",
-      "room": "office",
-      "type": "strip",
-      "pos": [
-        11.3,
-        4.2
-      ],
-      "y": 1.35,
-      "rot": 0,
-      "length": 2.2,
-      "capabilities": [
-        "brightness",
-        "temp",
-        "color"
-      ],
-      "color": "#00d4ff",
-      "link": {
-        "service": "govee",
-        "id": "48:A3:D6:50:84:C6:45:2E"
-      }
+      },
+      "locked": true
     },
     {
       "id": "bedroom.m1",
@@ -904,7 +1013,8 @@
       "link": {
         "service": "govee",
         "id": "B2:1A:0C:4E:A0:81:A9:24"
-      }
+      },
+      "locked": true
     },
     {
       "id": "bedroom.m2",
@@ -923,7 +1033,8 @@
       "link": {
         "service": "govee",
         "id": "87:17:A8:46:74:10:8A:20"
-      }
+      },
+      "locked": true
     },
     {
       "id": "bedroom.m3",
@@ -942,29 +1053,43 @@
       "link": {
         "service": "govee",
         "id": "5F:B7:0C:4E:A0:88:6D:B0"
-      }
+      },
+      "locked": true
+    },
+    {
+      "id": "office.rope",
+      "name": "Office rope light",
+      "room": "office",
+      "type": "strip",
+      "pos": [
+        13.15,
+        4.7
+      ],
+      "y": 1.9,
+      "rot": -90,
+      "length": 1.1,
+      "capabilities": [
+        "brightness",
+        "temp",
+        "color"
+      ],
+      "color": "#00d4ff",
+      "link": {
+        "service": "govee",
+        "id": "48:A3:D6:50:84:C6:45:2E"
+      },
+      "locked": true
     }
   ],
   "acs": [
     {
       "id": "living.ac",
       "name": "Living AC",
-      "room": "living",
-      "wall": "north",
-      "pos": [
-        4.7,
-        8.85
-      ],
-      "y": 2.3
-    },
-    {
-      "id": "bedroom.ac",
-      "name": "Bedroom AC",
-      "room": "bedroom",
+      "room": "garage",
       "wall": "east",
       "pos": [
-        13.25,
-        11.4
+        5.95,
+        5.3
       ],
       "y": 2.3
     }
@@ -1004,11 +1129,6 @@
           "on": true,
           "brightness": 0.8,
           "color": "#ff7a3c"
-        },
-        "office.rope": {
-          "on": true,
-          "brightness": 0.7,
-          "color": "#00d4ff"
         },
         "bedroom.m2": {
           "on": true,
@@ -1051,11 +1171,7 @@
           "temp": 2400
         }
       },
-      "acs": {
-        "bedroom.ac": {
-          "sleep": true
-        }
-      }
+      "acs": {}
     },
     {
       "id": "away",
