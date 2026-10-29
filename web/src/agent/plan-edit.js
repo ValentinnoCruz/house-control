@@ -5,9 +5,9 @@ import { FURNITURE_TYPES, footprint } from '../three/furniture.js';
 
 export const SCENE_ICONS = ['sun', 'sofa', 'film', 'moon', 'door', 'bed', 'tv', 'sparkles'];
 export const WALLS = ['north', 'south', 'east', 'west'];
-const FURNITURE_KEYS = ['type', 'pos', 'rot', 'width', 'height', 'size', 'color', 'chairs', 'stools', 'upper'];
-const LIGHT_KEYS = ['id', 'name', 'room', 'type', 'pos', 'y', 'rot', 'length', 'capabilities', 'color'];
-const AC_KEYS = ['id', 'name', 'room', 'wall', 'pos', 'y', 'min', 'max'];
+const FURNITURE_KEYS = ['type', 'pos', 'rot', 'width', 'depth', 'height', 'size', 'color', 'chairs', 'stools', 'upper', 'name', 'group', 'locked'];
+const LIGHT_KEYS = ['id', 'name', 'room', 'type', 'pos', 'y', 'rot', 'length', 'capabilities', 'color', 'disabled', 'locked'];
+const AC_KEYS = ['id', 'name', 'room', 'wall', 'pos', 'y', 'min', 'max', 'locked'];
 
 export class PlanEditError extends Error {}
 
@@ -51,7 +51,7 @@ function cleanFurniture(item, where) {
   const out = pick(item, FURNITURE_KEYS);
   out.pos = out.pos.map(round);
   if (out.rot != null) { if (!isNum(out.rot)) fail(`${where}: "rot" must be a number of degrees`); out.rot = Math.round(out.rot); }
-  for (const k of ['width', 'height']) {
+  for (const k of ['width', 'depth', 'height']) {
     if (out[k] != null && !(isNum(out[k]) && out[k] > 0.1 && out[k] < 12)) fail(`${where}: "${k}" must be metres between 0.1 and 12`);
   }
   if (out.size != null && !(isPoint(out.size) && out.size.every((v) => v > 0.1 && v < 15))) fail(`${where}: "size" must be [width, depth] in metres`);
@@ -315,12 +315,21 @@ export function replacePlan(old, next) {
 /** What each furniture type is, for the AI that places it. */
 export const FURNITURE_GUIDE = {
   sofa: 'sofa; options width, color',
+  loveseat: '2-seat loveseat couch (both armrests); options width, color',
+  loveseatLeft: 'left-arm loveseat (missing right armrest to connect to chaiseRight); options width, color',
+  loveseatRight: 'right-arm loveseat (missing left armrest to connect to chaiseLeft); options width, color',
+  chaise: 'standalone chaise lounge; options width, color',
+  chaiseLeft: 'left-arm chaise lounge (missing right armrest to connect to loveseatRight); options width, color',
+  chaiseRight: 'right-arm chaise lounge (missing left armrest to connect to loveseatLeft); options width, color',
   armchair: 'armchair; option color',
   coffeeTable: 'low coffee table; option width',
   rug: 'flat rug; options size [w, d], color',
   tv: 'TV on a low media console; option width',
   sideboard: 'sideboard / low cabinet; option width',
   diningSet: 'dining table with chairs around it; options width, chairs',
+  roundDiningSet: 'circular counter-height dining table with center shelves and 4 high chairs; options width, chairs, color',
+  coffeeBar: 'navy & wood coffee bar / buffet hutch cabinet; options width, color',
+  pantry: 'tall kitchen pantry cabinet (same dimensions as fridge: 0.7m x 0.68m x 1.92m); options width, color',
   island: 'kitchen island with stools on its front side; options width, stools',
   kitchen: 'run of kitchen base cabinets with counter, sink and hob; options width, upper (wall cabinets, default true)',
   fridge: 'tall fridge',
@@ -330,6 +339,7 @@ export const FURNITURE_GUIDE = {
   plant: 'potted plant; option height',
   vanity: 'bathroom vanity with basin and mirror; option width',
   bathtub: 'bathtub',
+  tubShower: 'standing tub shower with glass shower shield and rainfall shower column; options width, depth',
   toilet: 'toilet',
   desk: 'desk; option width',
   wardrobe: 'wardrobe; options width, height',

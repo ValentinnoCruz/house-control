@@ -4,23 +4,26 @@ import {
   SlidersHorizontal, Check, House, Settings2, AirVent, Sparkles, FolderOpen, Plug, Lamp, SunDim, SunMedium,
   Tv, BedDouble, Palette, RefreshCw, X,
   ShieldCheck, Link2, Copy, MessageSquareText, BookOpen, Terminal, RotateCcw, Globe, Laptop, Clock, Box, Download,
-  Undo2, Activity, KeyRound, ArrowUpRight, Camera, Square,
+  Undo2, Redo2, Activity, KeyRound, ArrowUpRight, Camera, Square,
   HouseWifi, Smartphone, Radar, CircleCheck, CircleAlert, ChevronRight, Unlink, LoaderCircle, Router,
+  Lock, Unlock, Eye, EyeOff, Maximize2, Minimize2, ZoomIn, ZoomOut, Move,
 } from 'lucide';
 
 const ICONS = {
   power: Power, sun: Sun, sofa: Sofa, film: Film, moon: Moon, door: DoorOpen,
-  ceiling: LampCeiling, pendant: Lamp, spots: Lightbulb, floor: LampFloor, table: LampDesk, strip: Sparkles,
+  ceiling: LampCeiling, fanBulb: Lightbulb, pendant: Lamp, spots: Lightbulb, floor: LampFloor, table: LampDesk, strip: Sparkles,
   cool: Snowflake, heat: Flame, dry: Droplets, fan: Fan, auto: RefreshCw, wind: Wind, leaf: Leaf,
   down: ChevronDown, back: ChevronLeft, plus: Plus, minus: Minus, thermo: Thermometer,
   sliders: SlidersHorizontal, check: Check, home: House, settings: Settings2, ac: AirVent,
   folder: FolderOpen, plug: Plug, dim: SunDim, bright: SunMedium, tv: Tv, bed: BedDouble,
   palette: Palette, sparkles: Sparkles, close: X,
   shield: ShieldCheck, link: Link2, copy: Copy, chat: MessageSquareText, book: BookOpen, terminal: Terminal,
-  rotate: RotateCcw, globe: Globe, laptop: Laptop, clock: Clock, box: Box, download: Download, undo: Undo2,
+  rotate: RotateCcw, globe: Globe, laptop: Laptop, clock: Clock, box: Box, download: Download, undo: Undo2, redo: Redo2,
   activity: Activity, key: KeyRound, external: ArrowUpRight, camera: Camera, stop: Square,
   homeassistant: HouseWifi, phone: Smartphone, radar: Radar, ok: CircleCheck, alert: CircleAlert,
   next: ChevronRight, unlink: Unlink, spinner: LoaderCircle, bridge: Router, bulb: Lightbulb,
+  lock: Lock, unlock: Unlock, eye: Eye, eyeOff: EyeOff, maximize: Maximize2, minimize: Minimize2,
+  zoomIn: ZoomIn, zoomOut: ZoomOut, move: Move,
 };
 
 export function icon(name, size = 18, stroke = 1.8) {

@@ -1,7 +1,7 @@
 // Loads and normalises a floor plan ("home.json"). Everything the 3D scene and the UI
 // know about the apartment comes from this one document, so swapping the file swaps the home.
 
-const LIGHT_TYPES = ['ceiling', 'pendant', 'spots', 'floor', 'table', 'strip'];
+const LIGHT_TYPES = ['ceiling', 'fan', 'fanBulb', 'pendant', 'spots', 'floor', 'table', 'strip'];
 const WALLS = ['north', 'south', 'east', 'west'];
 
 export class ConfigError extends Error {}
@@ -9,7 +9,7 @@ export class ConfigError extends Error {}
 export const LIGHT_KINDS = LIGHT_TYPES;
 
 // A lamp or an AC is real when it is linked to a device of a connected platform:
-// `link: { service, id }` (Home Assistant, Philips Hue, Apple Home) or, for Smart Life,
+// `link: { service, id }` (Govee LAN, Home Assistant, Philips Hue, Apple Home) or, for Smart Life,
 // `tuya: { deviceId }`. An AC's `sensor: { service, id }` is a thermometer for its room.
 export const LINK_FIELDS = ['tuya', 'link', 'sensor'];
 
@@ -23,19 +23,25 @@ export const isLinked = (d) => Boolean(linkOf(d));
 
 /** The platforms House Control can link to, in the order the editor lists them. */
 export const SERVICES = {
+  govee: { name: 'Govee (LAN + Cloud)', short: 'Govee' },
   smartlife: { name: 'Smart Life', short: 'Smart Life' },
   homeassistant: { name: 'Home Assistant', short: 'Home Assistant' },
   hue: { name: 'Philips Hue', short: 'Hue' },
   homekit: { name: 'Apple Home', short: 'Apple Home' },
 };
-export const FLOOR_KINDS = ['oak', 'walnut', 'tile', 'stone'];
+export const FLOOR_KINDS = ['oak', 'walnut', 'tile', 'stone', 'rug'];
 
 // The plan exactly as written on disk (the editor works on this form).
 export async function loadRawConfig() {
   const boot = window.__HOUSE_BOOT__;
-  if (boot?.config) return boot.config;
-  const plan = (boot?.plan !== 'custom' && boot?.plan) || new URLSearchParams(location.search).get('plan') || 'home';
-  const res = await fetch(`./plans/${plan}.json`);
+  const urlPlan = new URLSearchParams(location.search).get('plan');
+  if (!urlPlan && boot?.config) return boot.config;
+  const plan = urlPlan || (boot?.plan !== 'custom' && boot?.plan) || 'home';
+  if (plan === 'custom') {
+    const res = await fetch('/api/plan/custom');
+    if (res.ok) return await res.json();
+  }
+  const res = await fetch(`./plans/${plan === 'custom' ? 'home' : plan}.json`);
   if (!res.ok) throw new ConfigError(`Plan "${plan}" not found (HTTP ${res.status})`);
   try {
     return await res.json();
@@ -71,17 +77,17 @@ export function normalize(raw) {
       `Room "${r.id}" needs "rect": [x, z, width, depth]`);
     const [x, z, w, d] = r.rect;
     need(w > 0 && d > 0, `Room "${r.id}" has an empty rect`);
-    return { id: r.id, name: r.name || r.id, x, z, w, d, floor: r.floor || 'oak' };
+    return { id: r.id, name: r.name || r.id, x, z, w, d, floor: r.floor || 'oak', locked: Boolean(r.locked) };
   });
   const roomIds = new Set(rooms.map((r) => r.id));
 
   const openings = (raw.openings || []).map((o, i) => {
     need(isPoint(o.from) && isPoint(o.to), `Opening #${i + 1} needs "from" and "to" points`);
     need(o.from[0] === o.to[0] || o.from[1] === o.to[1], `Opening #${i + 1} must be axis-aligned`);
-    return { type: o.type || 'door', from: o.from, to: o.to, sill: o.sill ?? 0.85, head: o.head ?? 2.1 };
+    return { type: o.type || 'door', from: o.from, to: o.to, sill: o.sill ?? 0.85, head: o.head ?? 2.1, locked: Boolean(o.locked) };
   });
 
-  const lights = (raw.lights || []).map((l) => {
+  const allLights = (raw.lights || []).map((l) => {
     unique(l.id, 'A light');
     need(roomIds.has(l.room), `Light "${l.id}" refers to unknown room "${l.room}"`);
     need(LIGHT_TYPES.includes(l.type), `Light "${l.id}" has unknown type "${l.type}" (use ${LIGHT_TYPES.join(', ')})`);
@@ -90,9 +96,12 @@ export function normalize(raw) {
       ...l,
       name: l.name || l.id,
       rot: l.rot || 0,
+      disabled: Boolean(l.disabled),
+      locked: Boolean(l.locked),
       capabilities: l.capabilities || [], // plain smart plugs: on/off only
     };
   });
+  const lights = allLights.filter((l) => !l.disabled);
 
   const acs = (raw.acs || []).map((a) => {
     unique(a.id, 'An AC');
@@ -122,6 +131,7 @@ export function normalize(raw) {
     openings,
     furniture: raw.furniture || [],
     lights,
+    allLights,
     acs,
     scenes,
     bounds: { minX, minZ, maxX, maxZ },

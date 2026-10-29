@@ -798,3 +798,83 @@ html.ios .fatal { margin: calc(env(safe-area-inset-top, 0px) + 20px) 16px 0; wid
     animation-duration: 1ms !important; transition-duration: 1ms !important;
   }
 }
+
+
+.panel-nav-toggles {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.pill.tiny {
+  height: 22px;
+  padding: 0 9px;
+  font-size: 10.5px;
+}
+.collapsed-row {
+  display: none !important;
+}
+.card.panel-minimized {
+  --stage-h: 82%;
+}
+.card.panel-minimized .scenes,
+.card.panel-minimized .rooms,
+.card.panel-minimized .devices {
+  display: none !important;
+}
+.group-label.collapsible {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 6px;
+  border-radius: 8px;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid transparent;
+  text-align: left;
+  transition: background 160ms, color 160ms;
+}
+.group-label.collapsible:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+}
+.group-label .group-count {
+  margin-left: auto;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--muted);
+}
+
+
+/* easy-click-light-buttons */
+.tile {
+  min-height: 72px;
+  cursor: pointer !important;
+}
+.tile .bubble {
+  width: 42px;
+  height: 42px;
+  cursor: pointer;
+}
+.tile .bubble:hover {
+  transform: scale(1.06);
+}
+.tile-more {
+  width: 36px !important;
+  height: 36px !important;
+  margin-right: 0 !important;
+  border-radius: 11px !important;
+  opacity: 1 !important;
+  color: var(--text) !important;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  cursor: pointer;
+}
+.tile-more:hover {
+  background: rgba(255, 255, 255, 0.22) !important;
+  transform: scale(1.06);
+}

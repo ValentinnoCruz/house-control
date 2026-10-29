@@ -42,8 +42,14 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
   const canvas = h('canvas', { tabindex: -1 });
   const tooltip = h('div.tooltip');
   const homeSub = h('div.home-sub');
+  const collapsedRooms = new Set();
+  let scenesCollapsed = false;
+  let roomsBarCollapsed = false;
+  let panelMinimized = false;
+
   const power = h('button.round.power', { title: 'Everything on / off', 'aria-label': 'Toggle everything', onclick: toggleEverything }, icon('power', 21, 2.2));
-  const gear = h('button.round', { title: 'Floor plan', 'aria-label': 'Floor plan menu', onclick: () => onMenu(gear) }, icon('settings', 17));
+  const editPlanBtn = h('button.round', { title: 'Open 2D Floor Plan Editor', 'aria-label': 'Open 2D Floor Plan Editor', onclick: () => { location.href = `${location.pathname}?mode=editor`; } }, icon('box', 16));
+  const gear = h('button.round', { title: 'Menu & views', 'aria-label': 'Floor plan menu', onclick: () => onMenu(gear) }, icon('settings', 17));
   // Shown while an AI assistant has a link to this home (AI Access on the Mac).
   const aiBadge = h('button.ai-badge', { hidden: true, title: 'An AI assistant has access — click to manage', 'aria-label': 'AI access',
     onclick: () => onMenu(aiBadge, 'agent') }, icon('sparkles', 13, 2.2), h('span', 'AI'));
@@ -52,9 +58,56 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
   const rooms = h('div.rooms');
   const listTitle = h('span.title');
   const grid = h('div.grid');
+
+  const collapseAllBtn = h('button.pill', {
+    title: 'Collapse or expand all room light lists',
+    onclick: () => {
+      const activeRoomIds = config.rooms
+        .filter((r) => [...tiles.values()].some((t) => t.cfg.room === r.id))
+        .map((r) => r.id);
+      const allClosed = activeRoomIds.every((id) => collapsedRooms.has(id));
+      if (allClosed) collapsedRooms.clear();
+      else activeRoomIds.forEach((id) => collapsedRooms.add(id));
+      layoutTiles();
+    },
+  }, 'Collapse all');
+
+  const toggleScenesBtn = h('button.pill.tiny', {
+    onclick: () => {
+      scenesCollapsed = !scenesCollapsed;
+      scenes.classList.toggle('collapsed-row', scenesCollapsed);
+      toggleScenesBtn.textContent = scenesCollapsed ? 'Scenes ▸' : 'Scenes ▾';
+    },
+  }, 'Scenes ▾');
+
+  const toggleRoomsBtn = h('button.pill.tiny', {
+    onclick: () => {
+      roomsBarCollapsed = !roomsBarCollapsed;
+      rooms.classList.toggle('collapsed-row', roomsBarCollapsed);
+      toggleRoomsBtn.textContent = roomsBarCollapsed ? 'Rooms ▸' : 'Rooms ▾';
+    },
+  }, 'Rooms ▾');
+
+  const toggleDrawerBtn = h('button.pill.tiny', {
+    onclick: () => {
+      panelMinimized = !panelMinimized;
+      card.classList.toggle('panel-minimized', panelMinimized);
+      toggleDrawerBtn.textContent = panelMinimized ? 'Expand panel ▲' : 'Minimize ▼';
+      setTimeout(() => world?.resize(), 50);
+    },
+  }, 'Minimize ▼');
+
+  const navBar = h('div.panel-nav-toggles',
+    toggleScenesBtn,
+    toggleRoomsBtn,
+    h('button.pill.tiny', { onclick: () => { location.href = `${location.pathname}?mode=editor`; } }, '2D Floor Plan ↗'),
+    toggleDrawerBtn);
+
   const panel = h('section.panel',
+    navBar,
     scenes, rooms,
     h('div.list-head', listTitle,
+      collapseAllBtn,
       h('button.pill', { onclick: () => bulk(true) }, 'All on'),
       h('button.pill', { onclick: () => bulk(false) }, 'All off')),
     h('div.devices', grid));
@@ -68,7 +121,7 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
     h('header.top',
       h('div.home', h('div.home-badge', icon('home', 17)),
         h('div', h('div.home-name', config.name), homeSub)),
-      aiBadge, gear, power),
+      aiBadge, editPlanBtn, gear, power),
     tooltip, panel, sheet, toastEl);
   const card = h('div.card.booting', h('div.notch'), clip);
   root.replaceChildren(card);
@@ -86,7 +139,8 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
   /* ---------- rooms ---------- */
 
   const roomButtons = new Map();
-  for (const r of [{ id: 'all', name: 'All' }, ...config.rooms]) {
+  const roomsWithLights = config.rooms.filter((r) => config.lights.some((l) => l.room === r.id));
+  for (const r of [{ id: 'all', name: 'All' }, ...roomsWithLights]) {
     const count = h('span.count.zero', '0');
     const b = h('button.room', { onclick: () => { haptic('tick'); selectRoom(r.id); } }, r.name, count);
     roomButtons.set(r.id, { b, count });
@@ -98,7 +152,7 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
     ui.room = id;
     layoutTiles();
     update();
-    roomButtons.get(id).b.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+    roomButtons.get(id)?.b.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
     onFocus(id === 'all' ? null : { kind: 'room', id });
   }
 
@@ -131,12 +185,19 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
     const dimmable = cfg.capabilities.includes('brightness');
     const hasSheet = cfg.capabilities.length > 0;
     const sub = h('div.tile-sub');
-    // A phone has no room for the button: touching and holding the tile opens the sheet there.
-    const more = hasSheet && !isPhone
-      ? h('button.tile-more', { 'aria-label': `${cfg.name} settings`, onclick: (e) => { e.stopPropagation(); openSheet({ kind: 'light', id: cfg.id }); } }, icon('sliders', 15))
+    const more = hasSheet
+      ? h('button.tile-more', {
+        title: `${cfg.name} colour & brightness`,
+        'aria-label': `${cfg.name} settings`,
+        onclick: (e) => { e.stopPropagation(); openSheet({ kind: 'light', id: cfg.id }); },
+      }, icon('sliders', 16, 2.2))
       : null;
+    const bubbleBtn = h('div.bubble', {
+      title: `Toggle ${cfg.name}`,
+      onclick: (e) => { e.stopPropagation(); toggleLight(cfg.id); },
+    }, icon(cfg.capabilities.length ? cfg.type : 'plug', 19));
     const el = h(`div.tile${dimmable ? '.dimmable' : ''}`, { role: 'button', tabindex: 0, 'aria-label': cfg.name },
-      h('div.bubble', icon(cfg.capabilities.length ? cfg.type : 'plug', 19)),
+      bubbleBtn,
       h('div.tile-text', h('div.tile-name', cfg.name), sub),
       more,
       h('div.tile-level'));
@@ -144,7 +205,7 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
     // Tap toggles; dragging sideways dims (HomeKit-style).
     let gesture = null;
     el.addEventListener('pointerdown', (ev) => {
-      if (ev.target.closest('.tile-more') || ev.button !== 0) return;
+      if (ev.target.closest('.tile-more') || ev.target.closest('.bubble') || ev.button !== 0) return;
       el.setPointerCapture(ev.pointerId);
       const s = state.lights[cfg.id];
       gesture = { x: ev.clientX, y: ev.clientY, start: s.on ? s.brightness : 0, moved: false, step: null };
@@ -162,9 +223,9 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
     el.addEventListener('pointermove', (ev) => {
       if (!gesture) return;
       const dx = ev.clientX - gesture.x;
-      if (Math.hypot(dx, ev.clientY - gesture.y) > 8) clearTimeout(gesture.hold);
-      // A mostly vertical move is the list being scrolled, not a dim.
-      if (!gesture.moved && dimmable && Math.abs(dx) > 6 && Math.abs(dx) > Math.abs(ev.clientY - gesture.y)) {
+      if (Math.hypot(dx, ev.clientY - gesture.y) > 14) clearTimeout(gesture.hold);
+      // Require an intentional 18px horizontal drag so normal clicks/taps always toggle reliably.
+      if (!gesture.moved && dimmable && Math.abs(dx) > 18 && Math.abs(dx) > Math.abs(ev.clientY - gesture.y) * 1.4) {
         gesture.moved = true;
         el.classList.add('dragging');
       }
@@ -248,20 +309,41 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
     const nodes = [];
     let i = 0;
     const add = (t) => { t.el.style.setProperty('--i', i++); nodes.push(t.el); };
+    const activeRooms = config.rooms.filter((r) => [...tiles.values()].some((t) => t.cfg.room === r.id));
+    if (collapseAllBtn) {
+      const allClosed = activeRooms.length > 0 && activeRooms.every((r) => collapsedRooms.has(r.id));
+      collapseAllBtn.textContent = allClosed ? 'Expand all' : 'Collapse all';
+      collapseAllBtn.style.display = ui.room === 'all' ? '' : 'none';
+    }
     for (const room of config.rooms) {
       if (ui.room !== 'all' && room.id !== ui.room) continue;
       const devices = [...tiles.values()].filter((t) => t.cfg.room === room.id);
       if (!devices.length) continue;
-      if (ui.room === 'all') nodes.push(h('div.group-label', room.name));
-      devices.filter((t) => t.kind === 'ac').forEach(add);
-      devices.filter((t) => t.kind === 'light').forEach(add);
+      const isCollapsed = ui.room === 'all' && collapsedRooms.has(room.id);
+      if (ui.room === 'all') {
+        nodes.push(h('button.group-label.collapsible', {
+          onclick: () => {
+            if (collapsedRooms.has(room.id)) collapsedRooms.delete(room.id);
+            else collapsedRooms.add(room.id);
+            const scroll = grid.parentElement.scrollTop;
+            layoutTiles();
+            grid.parentElement.scrollTop = scroll;
+          },
+        },
+          icon(isCollapsed ? 'next' : 'down', 12, 2.4),
+          h('span', room.name),
+          h('small.group-count', `${devices.length}`)));
+      }
+      if (!isCollapsed) {
+        devices.filter((t) => t.kind === 'ac').forEach(add);
+        devices.filter((t) => t.kind === 'light').forEach(add);
+      }
     }
     if (!nodes.length) nodes.push(h('div.group-label', 'No devices in this room yet'));
     else if (isPhone && config.lights.some((l) => l.capabilities.length && inScope(l))) {
       nodes.push(h('div.grid-hint', 'Touch and hold a light for brightness and colour'));
     }
     grid.replaceChildren(...nodes);
-    grid.parentElement.scrollTop = 0;
   }
 
   /* ---------- sheets ---------- */

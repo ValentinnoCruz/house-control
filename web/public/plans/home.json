@@ -1,116 +1,1192 @@
 {
   "version": 1,
   "name": "Home",
-  "wallHeight": 2.6,
-  "interiorWallHeight": 1.25,
-  "camera": { "azimuth": 34, "elevation": 47 },
-  "outdoorTemp": 29,
-
+  "wallHeight": 2.8,
+  "interiorWallHeight": 1.3,
+  "camera": {
+    "azimuth": 28,
+    "elevation": 48
+  },
+  "outdoorTemp": 24,
   "rooms": [
-    { "id": "living",  "name": "Living",   "rect": [0, 3.6, 6.4, 4.6],  "floor": "oak" },
-    { "id": "dining",  "name": "Dining",   "rect": [6.4, 3.6, 4.0, 4.6], "floor": "oak" },
-    { "id": "kitchen", "name": "Kitchen",  "rect": [6.4, 0, 4.0, 3.6],   "floor": "stone" },
-    { "id": "bedroom", "name": "Bedroom",  "rect": [0, 0, 4.2, 3.6],     "floor": "walnut" },
-    { "id": "bath",    "name": "Bathroom", "rect": [4.2, 0, 2.2, 3.6],   "floor": "tile" }
+    {
+      "id": "garage",
+      "name": "Garage",
+      "rect": [
+        0,
+        -0.05,
+        5.95,
+        8.85
+      ],
+      "floor": "stone",
+      "locked": true
+    },
+    {
+      "id": "entry",
+      "name": "Entry",
+      "rect": [
+        5.95,
+        6.55,
+        1.75,
+        2.3
+      ],
+      "floor": "tile"
+    },
+    {
+      "id": "kitchen",
+      "name": "Kitchen",
+      "rect": [
+        0,
+        8.85,
+        3.5,
+        2.5
+      ],
+      "floor": "tile",
+      "locked": true
+    },
+    {
+      "id": "dining",
+      "name": "Dining Room",
+      "rect": [
+        0,
+        11.35,
+        3.5,
+        2.3
+      ],
+      "floor": "tile"
+    },
+    {
+      "id": "living",
+      "name": "Living Room",
+      "rect": [
+        3.45,
+        8.85,
+        4.25,
+        4.8
+      ],
+      "floor": "tile",
+      "locked": false
+    },
+    {
+      "id": "restroom",
+      "name": "Restroom",
+      "rect": [
+        7.7,
+        4.05,
+        1.65,
+        3.55
+      ],
+      "floor": "tile"
+    },
+    {
+      "id": "office",
+      "name": "Office",
+      "rect": [
+        9.35,
+        4.05,
+        3.9,
+        3.55
+      ],
+      "floor": "rug"
+    },
+    {
+      "id": "hallway",
+      "name": "Hallway",
+      "rect": [
+        7.7,
+        7.6,
+        2.7,
+        1.55
+      ],
+      "floor": "tile"
+    },
+    {
+      "id": "closet2",
+      "name": "Closet 2",
+      "rect": [
+        10.4,
+        7.6,
+        2.85,
+        0.78
+      ],
+      "floor": "rug"
+    },
+    {
+      "id": "closet3",
+      "name": "Closet 3",
+      "rect": [
+        10.4,
+        8.38,
+        2.85,
+        0.77
+      ],
+      "floor": "rug"
+    },
+    {
+      "id": "closet1",
+      "name": "Closet 1",
+      "rect": [
+        7.7,
+        9.15,
+        1.65,
+        0.8
+      ],
+      "floor": "tile"
+    },
+    {
+      "id": "bathroom",
+      "name": "Bathroom",
+      "rect": [
+        7.7,
+        9.95,
+        1.65,
+        3.7
+      ],
+      "floor": "tile"
+    },
+    {
+      "id": "bedroom",
+      "name": "Bedroom",
+      "rect": [
+        9.35,
+        9.15,
+        3.9,
+        4.5
+      ],
+      "floor": "rug"
+    }
   ],
-
   "openings": [
-    { "type": "door",   "from": [3.1, 3.6], "to": [4.0, 3.6] },
-    { "type": "door",   "from": [4.7, 3.6], "to": [5.5, 3.6] },
-    { "type": "open",   "from": [6.4, 4.2], "to": [6.4, 7.8] },
-    { "type": "open",   "from": [7.0, 3.6], "to": [10.0, 3.6] },
-    { "type": "window", "from": [0, 1.0],   "to": [0, 2.6] },
-    { "type": "window", "from": [0, 7.0],   "to": [0, 7.9] },
-    { "type": "window", "from": [0.9, 0],   "to": [2.3, 0], "sill": 1.5, "head": 2.2 }
+    {
+      "type": "open",
+      "from": [
+        0.8,
+        11.35
+      ],
+      "to": [
+        2.6,
+        11.35
+      ],
+      "locked": false
+    },
+    {
+      "type": "open",
+      "from": [
+        3.45,
+        11.4
+      ],
+      "to": [
+        3.45,
+        13.7
+      ],
+      "locked": false
+    },
+    {
+      "type": "open",
+      "from": [
+        5.95,
+        8.85
+      ],
+      "to": [
+        7.7,
+        8.85
+      ],
+      "locked": false
+    },
+    {
+      "type": "open",
+      "from": [
+        7.7,
+        8.4
+      ],
+      "to": [
+        7.7,
+        9.15
+      ],
+      "locked": false
+    },
+    {
+      "type": "door",
+      "from": [
+        0.85,
+        0
+      ],
+      "to": [
+        5.1,
+        0
+      ],
+      "head": 2.2,
+      "locked": false
+    },
+    {
+      "type": "door",
+      "from": [
+        0,
+        5.9
+      ],
+      "to": [
+        0,
+        6.6
+      ],
+      "head": 2.05,
+      "locked": false
+    },
+    {
+      "type": "door",
+      "from": [
+        5.95,
+        6.9
+      ],
+      "to": [
+        5.95,
+        7.6
+      ],
+      "head": 2.05,
+      "locked": false
+    },
+    {
+      "type": "door",
+      "from": [
+        6.4,
+        6.55
+      ],
+      "to": [
+        7.35,
+        6.55
+      ],
+      "head": 2.05,
+      "locked": false
+    },
+    {
+      "type": "door",
+      "from": [
+        8.45,
+        7.6
+      ],
+      "to": [
+        9.3,
+        7.6
+      ],
+      "head": 2.05,
+      "locked": false
+    },
+    {
+      "type": "door",
+      "from": [
+        9.45,
+        7.6
+      ],
+      "to": [
+        10.35,
+        7.6
+      ],
+      "head": 2.05,
+      "locked": false
+    },
+    {
+      "type": "door",
+      "from": [
+        11.2,
+        7.6
+      ],
+      "to": [
+        12.45,
+        7.6
+      ],
+      "head": 2.05,
+      "locked": false
+    },
+    {
+      "type": "door",
+      "from": [
+        8.15,
+        9.15
+      ],
+      "to": [
+        8.95,
+        9.15
+      ],
+      "head": 2.05,
+      "locked": false
+    },
+    {
+      "type": "door",
+      "from": [
+        9.45,
+        9.15
+      ],
+      "to": [
+        10.35,
+        9.15
+      ],
+      "head": 2.05,
+      "locked": false
+    },
+    {
+      "type": "door",
+      "from": [
+        11.2,
+        9.15
+      ],
+      "to": [
+        12.45,
+        9.15
+      ],
+      "head": 2.05,
+      "locked": false
+    },
+    {
+      "type": "door",
+      "from": [
+        9.35,
+        10.05
+      ],
+      "to": [
+        9.35,
+        10.75
+      ],
+      "head": 2.05,
+      "locked": false
+    },
+    {
+      "type": "door",
+      "from": [
+        0.65,
+        13.65
+      ],
+      "to": [
+        2.65,
+        13.65
+      ],
+      "head": 2.1,
+      "locked": false
+    },
+    {
+      "type": "door",
+      "from": [
+        10.1,
+        13.65
+      ],
+      "to": [
+        12.3,
+        13.65
+      ],
+      "head": 2.1,
+      "locked": false
+    },
+    {
+      "type": "window",
+      "from": [
+        0,
+        9.65
+      ],
+      "to": [
+        0,
+        10.45
+      ],
+      "sill": 0.9,
+      "head": 2.1,
+      "locked": false
+    },
+    {
+      "type": "window",
+      "from": [
+        0.1,
+        13.65
+      ],
+      "to": [
+        0.55,
+        13.65
+      ],
+      "sill": 0.85,
+      "head": 2.1,
+      "locked": false
+    },
+    {
+      "type": "window",
+      "from": [
+        2.75,
+        13.65
+      ],
+      "to": [
+        3.3,
+        13.65
+      ],
+      "sill": 0.85,
+      "head": 2.1,
+      "locked": false
+    },
+    {
+      "type": "window",
+      "from": [
+        3.95,
+        13.65
+      ],
+      "to": [
+        4.7,
+        13.65
+      ],
+      "sill": 0.9,
+      "head": 2.1,
+      "locked": false
+    },
+    {
+      "type": "window",
+      "from": [
+        6.45,
+        13.65
+      ],
+      "to": [
+        7.45,
+        13.65
+      ],
+      "sill": 0.9,
+      "head": 2.1,
+      "locked": false
+    },
+    {
+      "type": "window",
+      "from": [
+        11.15,
+        4.05
+      ],
+      "to": [
+        12.1,
+        4.05
+      ],
+      "sill": 0.9,
+      "head": 2.1,
+      "locked": false
+    },
+    {
+      "type": "window",
+      "from": [
+        7.7,
+        5.6
+      ],
+      "to": [
+        7.7,
+        4.8
+      ],
+      "sill": 1.4
+    }
   ],
-
   "furniture": [
-    { "type": "rug",         "pos": [2.3, 6.0],  "size": [2.5, 3.1], "color": "#3b4a66" },
-    { "type": "tv",          "pos": [0.32, 6.0], "rot": 90,  "width": 1.7 },
-    { "type": "sofa",        "pos": [3.95, 6.0], "rot": -90, "width": 2.5, "color": "#8b93a7" },
-    { "type": "coffeeTable", "pos": [2.3, 6.0],  "rot": 90 },
-    { "type": "armchair",    "pos": [1.9, 4.35], "rot": 12,  "color": "#c28a5a" },
-    { "type": "plant",       "pos": [0.5, 7.65], "height": 1.5 },
-    { "type": "sideboard",   "pos": [5.2, 7.85], "rot": 180, "width": 1.6 },
-
-    { "type": "diningSet",   "pos": [8.5, 6.4],  "width": 1.9, "chairs": 6 },
-    { "type": "plant",       "pos": [9.95, 7.75], "height": 1.1 },
-    { "type": "island",      "pos": [8.5, 3.75], "width": 2.2, "stools": 3 },
-
-    { "type": "kitchen",     "pos": [8.05, 0.41], "width": 3.1, "upper": true },
-    { "type": "fridge",      "pos": [10.02, 0.45] },
-
-    { "type": "rug",         "pos": [2.1, 2.3],  "size": [2.6, 1.6], "color": "#6a5a52" },
-    { "type": "bed",         "pos": [2.1, 1.2],  "width": 1.7, "color": "#7f8fb5" },
-    { "type": "nightstand",  "pos": [0.85, 0.4] },
-    { "type": "nightstand",  "pos": [3.35, 0.4] },
-    { "type": "dresser",     "pos": [3.87, 2.5], "rot": -90, "width": 1.3 },
-    { "type": "plant",       "pos": [0.45, 3.15], "height": 0.9 },
-
-    { "type": "vanity",      "pos": [4.95, 0.38], "width": 1.0 },
-    { "type": "bathtub",     "pos": [5.92, 1.35], "rot": 90 },
-    { "type": "toilet",      "pos": [4.58, 2.5],  "rot": 90 }
+    {
+      "type": "washer",
+      "pos": [
+        4.25,
+        8.45
+      ],
+      "rot": 180,
+      "width": 0.65,
+      "locked": false
+    },
+    {
+      "type": "washer",
+      "pos": [
+        4.95,
+        8.45
+      ],
+      "rot": 180,
+      "width": 0.65,
+      "locked": false
+    },
+    {
+      "type": "kitchen",
+      "pos": [
+        1.7,
+        9.25
+      ],
+      "rot": 0,
+      "width": 3.3,
+      "upper": true,
+      "locked": false
+    },
+    {
+      "type": "fridge",
+      "pos": [
+        2.97,
+        10.95
+      ],
+      "rot": -90,
+      "locked": false
+    },
+    {
+      "type": "roundDiningSet",
+      "pos": [
+        1.6,
+        12.75
+      ],
+      "rot": 0,
+      "width": 0.7,
+      "chairs": 4,
+      "color": "#383330",
+      "locked": false
+    },
+    {
+      "type": "chimney",
+      "pos": [
+        5.5,
+        13.35
+      ],
+      "rot": 180,
+      "width": 1.4,
+      "depth": 0.55,
+      "locked": false
+    },
+    {
+      "type": "rug",
+      "pos": [
+        4.7,
+        10.4
+      ],
+      "size": [
+        2.8,
+        2.2
+      ],
+      "color": "#3b4a66",
+      "rot": 90,
+      "locked": false
+    },
+    {
+      "type": "loveseatLeft",
+      "pos": [
+        4,
+        10.85
+      ],
+      "rot": 90,
+      "width": 1.5,
+      "color": "#8b93a7",
+      "locked": false
+    },
+    {
+      "type": "chaiseRight",
+      "pos": [
+        4.38,
+        9.55
+      ],
+      "rot": 90,
+      "width": 0.95,
+      "color": "#8b93a7",
+      "locked": false
+    },
+    {
+      "type": "nightstand",
+      "pos": [
+        7.4,
+        10.4
+      ],
+      "rot": -90,
+      "width": 1.2,
+      "locked": false
+    },
+    {
+      "type": "tv",
+      "pos": [
+        7.4,
+        11.55
+      ],
+      "rot": -90,
+      "width": 1.6,
+      "locked": false
+    },
+    {
+      "type": "plant",
+      "pos": [
+        3.9,
+        13.15
+      ],
+      "height": 1.5,
+      "locked": false
+    },
+    {
+      "type": "tubShower",
+      "pos": [
+        8.525,
+        4.46
+      ],
+      "rot": -180,
+      "width": 1.55,
+      "locked": false,
+      "depth": 0.7
+    },
+    {
+      "type": "toilet",
+      "pos": [
+        8.1,
+        5.1
+      ],
+      "rot": 90,
+      "locked": false
+    },
+    {
+      "type": "desk",
+      "pos": [
+        12.3,
+        4.45
+      ],
+      "rot": 0,
+      "width": 1.6,
+      "locked": false
+    },
+    {
+      "type": "bookshelf",
+      "pos": [
+        9.9,
+        4.3
+      ],
+      "rot": 0,
+      "width": 0.65,
+      "height": 1.8,
+      "locked": false
+    },
+    {
+      "type": "vanity",
+      "pos": [
+        8.05,
+        11.2
+      ],
+      "rot": 90,
+      "width": 2.25,
+      "locked": false
+    },
+    {
+      "type": "toilet",
+      "pos": [
+        8.1,
+        12.6
+      ],
+      "rot": 90,
+      "locked": false
+    },
+    {
+      "type": "tubShower",
+      "pos": [
+        8.55,
+        13.3
+      ],
+      "rot": -180,
+      "locked": false
+    },
+    {
+      "type": "bed",
+      "pos": [
+        12.1,
+        11.4
+      ],
+      "rot": -90,
+      "width": 1.7,
+      "color": "#7f8fb5",
+      "locked": false
+    },
+    {
+      "type": "nightstand",
+      "pos": [
+        12.95,
+        10.2
+      ],
+      "rot": -90,
+      "locked": false
+    },
+    {
+      "type": "nightstand",
+      "pos": [
+        12.95,
+        12.6
+      ],
+      "rot": -90,
+      "locked": false
+    },
+    {
+      "type": "rug",
+      "pos": [
+        11.4,
+        11.4
+      ],
+      "size": [
+        2.2,
+        2.6
+      ],
+      "color": "#6a5a52",
+      "locked": false
+    },
+    {
+      "type": "nightstand",
+      "pos": [
+        7.375,
+        12.725
+      ],
+      "rot": -90,
+      "locked": false
+    },
+    {
+      "type": "pantry",
+      "pos": [
+        0.42,
+        11.9
+      ],
+      "rot": 90,
+      "width": 0.7,
+      "color": "#e4e1da",
+      "locked": false
+    },
+    {
+      "type": "coffeeBar",
+      "pos": [
+        0.3,
+        12.95
+      ],
+      "rot": -270,
+      "width": 1.2,
+      "color": "#2c3e66",
+      "locked": false
+    },
+    {
+      "type": "kitchen",
+      "pos": [
+        0.375,
+        10.425
+      ],
+      "rot": 90,
+      "width": 1.7,
+      "locked": false
+    },
+    {
+      "type": "kitchen",
+      "pos": [
+        3.025,
+        10.075
+      ],
+      "rot": -90,
+      "width": 1,
+      "locked": false
+    },
+    {
+      "type": "vanity",
+      "pos": [
+        8.025,
+        6.575
+      ],
+      "rot": 90,
+      "width": 1.8,
+      "locked": false
+    },
+    {
+      "type": "pantry",
+      "pos": [
+        8.125,
+        8.025
+      ],
+      "rot": 90,
+      "locked": false
+    },
+    {
+      "type": "tv",
+      "pos": [
+        9.55,
+        12.1
+      ],
+      "rot": 90,
+      "locked": false
+    }
   ],
-
   "lights": [
-    { "id": "living.main",    "name": "Ceiling",       "room": "living",  "type": "ceiling", "pos": [2.9, 6.0],
-      "capabilities": ["brightness", "temp"] },
-    { "id": "living.floor",   "name": "Floor lamp",    "room": "living",  "type": "floor",   "pos": [0.6, 4.2] },
-    { "id": "living.tv",      "name": "TV backlight",  "room": "living",  "type": "strip",   "pos": [0.13, 6.0], "y": 1.05,
-      "rot": 90, "length": 1.5, "capabilities": ["brightness", "color"], "color": "#7b5cff" },
-
-    { "id": "dining.pendant", "name": "Pendant",       "room": "dining",  "type": "pendant", "pos": [8.5, 6.4], "y": 1.75,
-      "capabilities": ["brightness", "temp"] },
-
-    { "id": "kitchen.spots",  "name": "Spots",         "room": "kitchen", "type": "spots",   "pos": [8.4, 2.0],
-      "capabilities": ["brightness"] },
-    { "id": "kitchen.strip",  "name": "Counter light", "room": "kitchen", "type": "strip",   "pos": [8.05, 0.42], "y": 1.42,
-      "length": 2.9, "capabilities": ["brightness", "temp"] },
-
-    { "id": "bedroom.main",   "name": "Ceiling",       "room": "bedroom", "type": "ceiling", "pos": [2.1, 2.3],
-      "capabilities": ["brightness", "temp"] },
-    { "id": "bedroom.left",   "name": "Bedside left",  "room": "bedroom", "type": "table",   "pos": [0.85, 0.4], "y": 0.5 },
-    { "id": "bedroom.right",  "name": "Bedside right", "room": "bedroom", "type": "table",   "pos": [3.35, 0.4], "y": 0.5 },
-
-    { "id": "bath.main",      "name": "Ceiling",       "room": "bath",    "type": "ceiling", "pos": [5.2, 2.0],
-      "capabilities": ["brightness"] },
-    { "id": "bath.mirror",    "name": "Mirror light",  "room": "bath",    "type": "strip",   "pos": [4.95, 0.14], "y": 1.95,
-      "length": 0.8, "capabilities": ["brightness", "temp"] }
-  ],
-
-  "acs": [
-    { "id": "living.ac",  "name": "Living AC",  "room": "living",  "wall": "west",  "pos": [0, 4.45], "y": 2.2 },
-    { "id": "bedroom.ac", "name": "Bedroom AC", "room": "bedroom", "wall": "north", "pos": [3.3, 0],  "y": 2.2 }
-  ],
-
-  "scenes": [
-    { "id": "bright", "name": "Bright", "icon": "sun",
-      "lights": { "*": { "on": true, "brightness": 1, "temp": 4200 } } },
-    { "id": "cozy", "name": "Cozy", "icon": "sofa",
-      "lights": {
-        "*": { "on": false },
-        "living.floor":   { "on": true },
-        "living.tv":      { "on": true, "brightness": 0.7, "color": "#ff7a3c" },
-        "dining.pendant": { "on": true, "brightness": 0.45, "temp": 2400 },
-        "kitchen.strip":  { "on": true, "brightness": 0.6, "temp": 2700 },
-        "bedroom.left":   { "on": true },
-        "bedroom.right":  { "on": true }
-      } },
-    { "id": "movie", "name": "Movie", "icon": "film",
-      "lights": {
-        "*": { "on": false },
-        "living.tv":     { "on": true, "brightness": 0.9, "color": "#6a4cff" },
-        "kitchen.strip": { "on": true, "brightness": 0.2, "temp": 2400 }
-      } },
-    { "id": "night", "name": "Night", "icon": "moon",
-      "lights": {
-        "*": { "on": false },
-        "bedroom.left": { "on": true },
-        "bath.mirror":  { "on": true, "brightness": 0.25, "temp": 2300 }
+    {
+      "id": "garage.main",
+      "name": "Garage",
+      "room": "garage",
+      "type": "ceiling",
+      "pos": [
+        2.95,
+        4.2
+      ],
+      "capabilities": [
+        "brightness",
+        "temp",
+        "color"
+      ],
+      "link": {
+        "service": "govee",
+        "id": "33:1E:98:17:3C:97:DB:2E"
       },
-      "acs": { "bedroom.ac": { "sleep": true } } },
-    { "id": "away", "name": "Away", "icon": "door",
-      "lights": { "*": { "on": false } },
-      "acs": { "*": { "on": false } } }
+      "locked": true
+    },
+    {
+      "id": "garage.washer",
+      "name": "Garage-1-washer",
+      "room": "garage",
+      "type": "ceiling",
+      "pos": [
+        4.6,
+        8.4
+      ],
+      "capabilities": [
+        "brightness",
+        "temp",
+        "color"
+      ],
+      "link": {
+        "service": "govee",
+        "id": "6B:12:98:17:3C:3D:A3:42"
+      },
+      "locked": true
+    },
+    {
+      "id": "garage.light2",
+      "name": "Garage 2",
+      "room": "garage",
+      "type": "ceiling",
+      "pos": [
+        5.55,
+        3.75
+      ],
+      "capabilities": [
+        "brightness",
+        "temp",
+        "color"
+      ],
+      "link": {
+        "service": "govee",
+        "id": "60:B7:98:17:3C:3C:36:D8"
+      },
+      "locked": true
+    },
+    {
+      "id": "living.light1",
+      "name": "Living room 1",
+      "room": "living",
+      "type": "table",
+      "pos": [
+        7.4,
+        10.4
+      ],
+      "capabilities": [
+        "brightness",
+        "temp",
+        "color"
+      ],
+      "link": {
+        "service": "govee",
+        "id": "5A:66:98:17:3C:7B:AF:94"
+      },
+      "locked": true
+    },
+    {
+      "id": "living.light2",
+      "name": "Living room 2",
+      "room": "living",
+      "type": "table",
+      "pos": [
+        7.4,
+        12.7
+      ],
+      "capabilities": [
+        "brightness",
+        "temp",
+        "color"
+      ],
+      "link": {
+        "service": "govee",
+        "id": "C0:6B:98:17:3C:91:BB:A6"
+      },
+      "locked": true
+    },
+    {
+      "id": "living.tv",
+      "name": "TV Backlight 3 Lite",
+      "room": "living",
+      "type": "strip",
+      "pos": [
+        7.42,
+        11.55
+      ],
+      "y": 0.8,
+      "rot": -90,
+      "length": 1.5,
+      "capabilities": [
+        "brightness",
+        "temp",
+        "color"
+      ],
+      "color": "#7b5cff",
+      "link": {
+        "service": "govee",
+        "id": "7D:F6:D2:2D:44:46:22:39"
+      },
+      "locked": true
+    },
+    {
+      "id": "living.xmas",
+      "name": "Xmas tree",
+      "room": "living",
+      "type": "floor",
+      "pos": [
+        7.15,
+        13.3
+      ],
+      "capabilities": [
+        "brightness",
+        "temp",
+        "color"
+      ],
+      "link": {
+        "service": "govee",
+        "id": "11:94:C5:09:26:1A:37:3F"
+      },
+      "locked": true
+    },
+    {
+      "id": "office.light1",
+      "name": "Office 1",
+      "room": "office",
+      "type": "fan",
+      "pos": [
+        11.3,
+        5.8
+      ],
+      "capabilities": [
+        "brightness",
+        "temp",
+        "color"
+      ],
+      "link": {
+        "service": "govee",
+        "id": "F7:E5:98:17:3C:A2:F6:66"
+      },
+      "locked": true
+    },
+    {
+      "id": "office.light2",
+      "name": "Office 2",
+      "room": "office",
+      "type": "fanBulb",
+      "pos": [
+        11.11,
+        5.91
+      ],
+      "capabilities": [
+        "brightness",
+        "temp",
+        "color"
+      ],
+      "link": {
+        "service": "govee",
+        "id": "93:A2:98:17:3C:A1:53:5A"
+      },
+      "locked": true
+    },
+    {
+      "id": "office.light3",
+      "name": "Office 3",
+      "room": "office",
+      "type": "fanBulb",
+      "pos": [
+        11.49,
+        5.91
+      ],
+      "capabilities": [
+        "brightness",
+        "temp",
+        "color"
+      ],
+      "link": {
+        "service": "govee",
+        "id": "7A:13:98:17:3C:A4:1C:DC"
+      },
+      "locked": true
+    },
+    {
+      "id": "bedroom.m1",
+      "name": "M-1",
+      "room": "bedroom",
+      "type": "fan",
+      "pos": [
+        11.3,
+        11.4
+      ],
+      "capabilities": [
+        "brightness",
+        "temp",
+        "color"
+      ],
+      "link": {
+        "service": "govee",
+        "id": "B2:1A:0C:4E:A0:81:A9:24"
+      },
+      "locked": true
+    },
+    {
+      "id": "bedroom.m2",
+      "name": "M-2",
+      "room": "bedroom",
+      "type": "fanBulb",
+      "pos": [
+        11.11,
+        11.51
+      ],
+      "capabilities": [
+        "brightness",
+        "temp",
+        "color"
+      ],
+      "link": {
+        "service": "govee",
+        "id": "87:17:A8:46:74:10:8A:20"
+      },
+      "locked": true
+    },
+    {
+      "id": "bedroom.m3",
+      "name": "M-3",
+      "room": "bedroom",
+      "type": "fanBulb",
+      "pos": [
+        11.49,
+        11.51
+      ],
+      "capabilities": [
+        "brightness",
+        "temp",
+        "color"
+      ],
+      "link": {
+        "service": "govee",
+        "id": "5F:B7:0C:4E:A0:88:6D:B0"
+      },
+      "locked": true
+    },
+    {
+      "id": "office.rope",
+      "name": "Office rope light",
+      "room": "office",
+      "type": "strip",
+      "pos": [
+        13.15,
+        4.7
+      ],
+      "y": 1.9,
+      "rot": -90,
+      "length": 1.1,
+      "capabilities": [
+        "brightness",
+        "temp",
+        "color"
+      ],
+      "color": "#00d4ff",
+      "link": {
+        "service": "govee",
+        "id": "48:A3:D6:50:84:C6:45:2E"
+      },
+      "locked": true
+    }
+  ],
+  "acs": [
+    {
+      "id": "living.ac",
+      "name": "Living AC",
+      "room": "garage",
+      "wall": "east",
+      "pos": [
+        5.95,
+        5.3
+      ],
+      "y": 2.3
+    }
+  ],
+  "scenes": [
+    {
+      "id": "bright",
+      "name": "Bright",
+      "icon": "sun",
+      "lights": {
+        "*": {
+          "on": true,
+          "brightness": 1,
+          "temp": 4200
+        }
+      }
+    },
+    {
+      "id": "cozy",
+      "name": "Cozy",
+      "icon": "sofa",
+      "lights": {
+        "*": {
+          "on": false
+        },
+        "living.light1": {
+          "on": true,
+          "brightness": 0.5,
+          "temp": 2700
+        },
+        "living.light2": {
+          "on": true,
+          "brightness": 0.5,
+          "temp": 2700
+        },
+        "living.tv": {
+          "on": true,
+          "brightness": 0.8,
+          "color": "#ff7a3c"
+        },
+        "bedroom.m2": {
+          "on": true,
+          "brightness": 0.4,
+          "temp": 2700
+        },
+        "bedroom.m3": {
+          "on": true,
+          "brightness": 0.4,
+          "temp": 2700
+        }
+      }
+    },
+    {
+      "id": "movie",
+      "name": "Movie",
+      "icon": "film",
+      "lights": {
+        "*": {
+          "on": false
+        },
+        "living.tv": {
+          "on": true,
+          "brightness": 0.9,
+          "color": "#6a4cff"
+        }
+      }
+    },
+    {
+      "id": "night",
+      "name": "Night",
+      "icon": "moon",
+      "lights": {
+        "*": {
+          "on": false
+        },
+        "bedroom.m2": {
+          "on": true,
+          "brightness": 0.25,
+          "temp": 2400
+        }
+      },
+      "acs": {}
+    },
+    {
+      "id": "away",
+      "name": "Away",
+      "icon": "door",
+      "lights": {
+        "*": {
+          "on": false
+        }
+      },
+      "acs": {
+        "*": {
+          "on": false
+        }
+      }
+    }
   ]
 }

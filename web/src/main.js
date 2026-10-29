@@ -5,7 +5,7 @@ import { createPanel } from './ui/panel.js';
 import { createAgent } from './agent/tools.js';
 import { h, openMenu } from './ui/dom.js';
 import { icon } from './ui/icons.js';
-import { isNative, isPhone, post, incoming, haptic } from './bridge.js';
+import { isNative, isWebBackend, isPhone, post, incoming, haptic } from './bridge.js';
 
 const DEMO_PLANS = [
   { id: 'home', name: 'Demo · Apartment' },
@@ -14,7 +14,7 @@ const DEMO_PLANS = [
 const STAGE_INSETS = [62, 50]; // header above, panel overlap below
 
 const app = document.getElementById('app');
-if (isNative) document.documentElement.classList.add('native');
+if (isNative && !isWebBackend) document.documentElement.classList.add('native');
 if (isPhone) document.documentElement.classList.add('ios');
 
 // ?safeTop=62&safeBottom=34 stands in for a phone's safe areas when its layout is looked at in a browser.
@@ -65,8 +65,10 @@ async function boot() {
     onFocus: (target) => world?.focus(target),
     onMenu: (anchor, reason) => {
       if (reason === 'escape') post('close');
-      else if (reason === 'agent') post('openAgent');
-      else if (isPhone) post('openSettings'); // plans, sync and sign-in are native screens there
+      else if (reason === 'agent') {
+        if (isWebBackend) location.href = `${location.pathname}?mode=agent`;
+        else post('openAgent');
+      } else if (isPhone) post('openSettings'); // plans, sync and sign-in are native screens there
       else planMenu(anchor);
     },
   });
@@ -157,15 +159,34 @@ async function boot() {
         action: () => post('selectPlan', { plan: 'custom' }),
       });
     }
-    if (isNative) {
-      items.push('-',
-        { label: 'Edit home…', action: () => post('openEditor') },
-        { label: 'AI access…', action: () => post('openAgent') },
-        { label: 'Load floor plan…', action: () => post('loadPlan') },
-        { label: 'Reveal plan file', action: () => post('revealPlan') },
-        '-',
-        { label: 'Quit House Control', action: () => post('quit') });
-    }
+    items.push('-',
+      { label: 'Edit Home (2D & 3D Floor Plan Editor)…', action: () => { location.href = `${location.pathname}?mode=editor`; } },
+      { label: 'Load Floor Plan File (.json)…', action: () => {
+        const input = h('input', { type: 'file', accept: 'application/json,.json' });
+        input.addEventListener('change', async () => {
+          try {
+            const json = JSON.parse(await input.files[0].text());
+            normalize(structuredClone(json));
+            await post('savePlan', { config: json });
+            panel.toast('Floor plan loaded and applied');
+          } catch (e) {
+            panel.toast(`Could not load plan: ${e.message}`);
+          }
+        });
+        input.click();
+      } },
+      { label: 'Connections (Govee, Home Assistant, Hue)…', action: () => { location.href = `${location.pathname}?mode=editor&section=connections`; } },
+      { label: 'Show Dynamic Island View…', action: () => { location.href = `${location.pathname}?mode=island&expanded=1`; } },
+      { label: 'Pair Phone / Copy Home Wi-Fi Link…', action: () => {
+        const lanUrl = window.__HOUSE_BOOT__?.lan?.panelUrl || `http://${location.hostname}:5199/`;
+        navigator.clipboard?.writeText(lanUrl).catch(() => {});
+        panel.toast(`Copied phone Wi-Fi link: ${lanUrl}`);
+      } },
+      { label: 'iPhone / Mobile View…', action: () => { location.href = `${location.pathname}?platform=ios`; } },
+      { label: 'AI Access…', action: () => { location.href = `${location.pathname}?mode=agent`; } },
+      { label: 'Reveal Plan File in Explorer', action: () => post('revealPlan') },
+      { label: 'Reveal Device Log in Explorer', action: () => post('revealLog') },
+      { label: 'Reload', action: () => location.reload() });
     openMenu(panel.anchorMenu, anchor, items);
   }
 
@@ -173,7 +194,7 @@ async function boot() {
   if (store.acCfg.has(opened)) panel.openSheet({ kind: 'ac', id: opened });
   else if (store.lightCfg.has(opened)) panel.openSheet({ kind: 'light', id: opened });
 
-  if (!isNative) show();
+  if (!isNative || isWebBackend) show();
   post('ready', { summary: store.summary() });
   window.__house = { store, world, panel, config }; // handy in the dev console
 }

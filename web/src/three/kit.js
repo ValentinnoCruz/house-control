@@ -119,11 +119,30 @@ function tiles(base, perSide, grout) {
   });
 }
 
+function carpet(base) {
+  return canvasTexture(512, (g, s) => {
+    const rand = rng(base.charCodeAt(1) * 43);
+    g.fillStyle = base;
+    g.fillRect(0, 0, s, s);
+    for (let y = 0; y < s; y += 4) {
+      for (let x = 0; x < s; x += 4) {
+        g.fillStyle = shade(base, (rand() - 0.5) * 0.06);
+        g.fillRect(x, y, 4, 4);
+      }
+    }
+    g.strokeStyle = 'rgba(255,255,255,0.03)';
+    for (let y = 0; y < s; y += 8) {
+      g.beginPath(); g.moveTo(0, y); g.lineTo(s, y); g.stroke();
+    }
+  });
+}
+
 const FLOORS = {
   oak: () => planks('#c7a47c'),
   walnut: () => planks('#94705a'),
   tile: () => tiles('#d5dade', 4, '#aab0b8'),
   stone: () => tiles('#a2a7ae', 3, '#7c828b'),
+  rug: () => carpet('#4b5870'),
 };
 
 const floorMaterials = new Map();
@@ -133,7 +152,7 @@ export function floorMaterial(kind) {
   if (!floorMaterials.has(name)) {
     floorMaterials.set(name, new THREE.MeshStandardMaterial({
       map: FLOORS[name](),
-      roughness: name === 'tile' || name === 'stone' ? 0.55 : 0.75,
+      roughness: name === 'rug' ? 0.96 : (name === 'tile' || name === 'stone' ? 0.55 : 0.75),
     }));
   }
   return floorMaterials.get(name);
