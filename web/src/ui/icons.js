@@ -7,6 +7,7 @@ import {
   Undo2, Redo2, Activity, KeyRound, ArrowUpRight, Camera, Square,
   HouseWifi, Smartphone, Radar, CircleCheck, CircleAlert, ChevronRight, Unlink, LoaderCircle, Router,
   Lock, Unlock, Eye, EyeOff, Maximize2, Minimize2, ZoomIn, ZoomOut, Move,
+  Star, Calendar, QrCode, History, Layers, Bookmark, Trash2, Play,
 } from 'lucide';
 
 const ICONS = {
@@ -24,6 +25,8 @@ const ICONS = {
   next: ChevronRight, unlink: Unlink, spinner: LoaderCircle, bridge: Router, bulb: Lightbulb,
   lock: Lock, unlock: Unlock, eye: Eye, eyeOff: EyeOff, maximize: Maximize2, minimize: Minimize2,
   zoomIn: ZoomIn, zoomOut: ZoomOut, move: Move,
+  star: Star, calendar: Calendar, qr: QrCode, history: History, layers: Layers,
+  bookmark: Bookmark, trash: Trash2, play: Play, sync: RefreshCw,
 };
 
 export function icon(name, size = 18, stroke = 1.8) {

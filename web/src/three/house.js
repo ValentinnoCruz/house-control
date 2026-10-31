@@ -1,4 +1,5 @@
-// Turns the rooms + openings of a plan into floors, walls and windows.
+// Turns the rooms + openings of a plan into floors, walls and windows,
+// with Sims-style dynamic camera-facing wall cutaway support.
 import * as THREE from 'three';
 import { box, mat, at, floorMesh } from './kit.js';
 
@@ -67,6 +68,7 @@ function wallSegments(config) {
 export function buildHouse(config, camDir) {
   const group = new THREE.Group();
   const floors = [];
+  const wallEntries = [];
   const H = config.wallHeight;
   const Hi = Math.min(config.interiorWallHeight, H);
   const { minX, minZ, maxX, maxZ } = config.bounds;
@@ -95,54 +97,81 @@ export function buildHouse(config, camDir) {
   const frame = mat('#2c3142', { rough: 0.6 });
 
   // A wall piece running from a..b along its axis, between heights y0..y1.
-  const piece = (s, a, b, y0, y1, t, materials = wallMats) => {
+  const pieceTo = (parent, s, a, b, y0, y1, t, materials = wallMats) => {
     const len = b - a;
     const geo = s.axis === 'x' ? new THREE.BoxGeometry(len, y1 - y0, t) : new THREE.BoxGeometry(t, y1 - y0, len);
     const m = new THREE.Mesh(geo, materials);
     const mid = (a + b) / 2;
     m.position.set(s.axis === 'x' ? mid : s.c, (y0 + y1) / 2, s.axis === 'x' ? s.c : mid);
     m.castShadow = m.receiveShadow = true;
-    group.add(m);
+    parent.add(m);
     return m;
   };
 
   for (const s of wallSegments(config)) {
     const exterior = s.kind === 'exterior';
     const t = exterior ? EXT_T : INT_T;
-    // Outward normal of an exterior wall points away from its room.
     const nx = s.axis === 'z' ? -s.inside : 0;
     const nz = s.axis === 'x' ? -s.inside : 0;
-    const near = exterior && nx * camDir.x + nz * camDir.z > 0.15;
     const a = s.a - (s.freeA ? EXT_T / 2 : 0);
     const b = s.b + (s.freeB ? EXT_T / 2 : 0);
     const type = s.opening?.type;
 
-    if (near) {
-      if (type !== 'door') piece(s, a, b, 0, CURB, t);
-      continue;
-    }
     if (type === 'door' || type === 'open') continue;
+    if (type === 'window' && !exterior) continue;
 
+    // Curb version (used when wall is cut away)
+    const curbGroup = new THREE.Group();
+    pieceTo(curbGroup, s, a, b, 0, CURB, t);
+    group.add(curbGroup);
+
+    // Full version (used when wall is standing)
+    const fullGroup = new THREE.Group();
     const height = exterior ? H : Hi;
     if (type === 'window' && exterior) {
       const { sill, head } = s.opening;
-      piece(s, a, b, 0, sill, t);
-      piece(s, a, b, Math.min(head, H), H, t);
-      const pane = piece(s, a, b, sill, head, 0.03, glass);
+      pieceTo(fullGroup, s, a, b, 0, sill, t);
+      pieceTo(fullGroup, s, a, b, Math.min(head, H), H, t);
+      const pane = pieceTo(fullGroup, s, a, b, sill, head, 0.03, glass);
       pane.castShadow = false;
       const fw = 0.05;
       const bars = [[a, a + fw, sill, head], [b - fw, b, sill, head], [a, b, sill, sill + fw], [a, b, head - fw, head]];
       if (b - a > 1.2) bars.push([(a + b) / 2 - fw / 2, (a + b) / 2 + fw / 2, sill, head]);
-      for (const [fa, fb, y0, y1] of bars) piece(s, fa, fb, y0, y1, 0.07, frame);
-      continue;
+      for (const [fa, fb, y0, y1] of bars) pieceTo(fullGroup, s, fa, fb, y0, y1, 0.07, frame);
+    } else {
+      pieceTo(fullGroup, s, a, b, 0, height, t);
+      if (!exterior && Hi < H) {
+        const blk = pieceTo(fullGroup, s, a, b, Hi, H, 0.04, blocker);
+        blk.receiveShadow = false;
+      }
     }
-    if (type === 'window') continue; // a window in an interior wall is just a gap
+    group.add(fullGroup);
 
-    piece(s, a, b, 0, height, t);
-    // Interior walls are drawn cut low, but lamps should still be contained by the
-    // real, full-height wall: an invisible shadow caster fills in the missing part.
-    if (!exterior && Hi < H) piece(s, a, b, Hi, H, 0.04, blocker).receiveShadow = false;
+    wallEntries.push({ exterior, nx, nz, curbGroup, fullGroup });
   }
 
-  return { group, floors };
+  function updateCutaway(curCamDir = camDir, mode = 'auto') {
+    let changed = false;
+    for (const w of wallEntries) {
+      let cut = false;
+      if (mode === 'low') {
+        cut = true;
+      } else if (mode === 'full') {
+        cut = false;
+      } else {
+        // 'auto' (Sims-style): cut away exterior walls facing the current camera direction
+        cut = w.exterior && (w.nx * curCamDir.x + w.nz * curCamDir.z > 0.15);
+      }
+      if (w.curbGroup.visible !== cut || w.fullGroup.visible !== !cut) {
+        w.curbGroup.visible = cut;
+        w.fullGroup.visible = !cut;
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
+  updateCutaway(camDir, 'auto');
+
+  return { group, floors, updateCutaway };
 }

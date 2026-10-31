@@ -10,10 +10,11 @@ import { LightUnit } from './lights.js';
 import { ACUnit } from './ac.js';
 
 export const STAGE_BG = '#0a0e1a';
+export const STAGE_BG_DAY = '#17233a';
 
 const rad = THREE.MathUtils.degToRad;
 const clamp = THREE.MathUtils.clamp;
-const ORBIT_AZ = 40;       // degrees of freedom either side of the plan's default view
+const ORBIT_AZ = 180;      // full orbit freedom with Sims-style dynamic wall cutaway
 const EL_MIN = 20;
 const EL_MAX = 82;
 const ZOOM_MIN = 0.4;      // closest
@@ -21,6 +22,9 @@ const ZOOM_MAX = 1.4;
 
 export function createWorld(canvas, config, store, { onHover, onPick, onMove, editable = false, background = STAGE_BG }) {
   let isEditable = Boolean(editable);
+  let cutawayMode = localStorage.getItem('house-control:cutaway') || 'auto'; // 'auto' | 'low' | 'full'
+  let lightingMode = localStorage.getItem('house-control:lighting') || 'night'; // 'night' | 'day' | 'auto'
+
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: false, powerPreference: 'high-performance' });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -41,6 +45,7 @@ export function createWorld(canvas, config, store, { onHover, onPick, onMove, ed
 
   const baseAz = config.camera.azimuth;
   const camDir = new THREE.Vector3(Math.sin(rad(baseAz)), 0, Math.cos(rad(baseAz)));
+  const liveCamDir = camDir.clone();
 
   /* ---------- content ---------- */
 
@@ -82,8 +87,9 @@ export function createWorld(canvas, config, store, { onHover, onPick, onMove, ed
   }
   const baseHitTargets = [...[...lights.values()].map((u) => u.hit), ...[...acs.values()].map((u) => u.hit), ...house.floors];
 
-  // Night-time ambience: enough to read the model with every lamp off.
-  scene.add(new THREE.HemisphereLight(0x8ea6ff, 0x0b0e17, 0.42));
+  // Ambience + Sun/Moon directional light
+  const hemi = new THREE.HemisphereLight(0x8ea6ff, 0x0b0e17, 0.42);
+  scene.add(hemi);
   const moon = new THREE.DirectionalLight(0xa9c0ff, 0.6);
   // Steep and coming from the viewer's side, so the faces we look at stay readable.
   moon.position.copy(center).add(new THREE.Vector3(camDir.x * 3.2 + 1.5, 10, camDir.z * 3.2 - 1.5));
@@ -99,6 +105,27 @@ export function createWorld(canvas, config, store, { onHover, onPick, onMove, ed
   moon.shadow.normalBias = 0.04;
   moon.shadow.radius = 4;
   scene.add(moon, moon.target);
+
+  function applyLightingEnvironment() {
+    const hour = new Date().getHours();
+    const isDay = lightingMode === 'day' || (lightingMode === 'auto' && hour >= 7 && hour < 19);
+    if (isDay) {
+      hemi.color.setHex(0xdbeafe);
+      hemi.groundColor.setHex(0x2e3646);
+      hemi.intensity = 0.88;
+      moon.color.setHex(0xfff3db);
+      moon.intensity = 1.25;
+      scene.background.set(STAGE_BG_DAY);
+    } else {
+      hemi.color.setHex(0x8ea6ff);
+      hemi.groundColor.setHex(0x0b0e17);
+      hemi.intensity = 0.42;
+      moon.color.setHex(0xa9c0ff);
+      moon.intensity = 0.6;
+      scene.background.set(background || STAGE_BG);
+    }
+  }
+  applyLightingEnvironment();
 
   /* ---------- post-processing ---------- */
 
@@ -186,6 +213,10 @@ export function createWorld(canvas, config, store, { onHover, onPick, onMove, ed
     camera.position.copy(rig.target).addScaledVector(fwd, -rig.dist);
     camera.up.set(0, 1, 0);
     camera.lookAt(rig.target);
+    liveCamDir.set(Math.sin(rad(rig.az)), 0, Math.cos(rad(rig.az)));
+    if (house.updateCutaway?.(liveCamDir, cutawayMode)) {
+      shadowFrames = Math.max(shadowFrames, 2);
+    }
     return delta > 0.002;
   }
 
@@ -476,6 +507,22 @@ export function createWorld(canvas, config, store, { onHover, onPick, onMove, ed
 
     setEditable(on) { isEditable = Boolean(on); wake(2); },
     get editable() { return isEditable; },
+    getCutawayMode() { return cutawayMode; },
+    setCutawayMode(mode) {
+      cutawayMode = ['auto', 'low', 'full'].includes(mode) ? mode : 'auto';
+      try { localStorage.setItem('house-control:cutaway', cutawayMode); } catch { /* ignore */ }
+      house.updateCutaway?.(liveCamDir, cutawayMode);
+      shadowFrames = Math.max(shadowFrames, 2);
+      wake(3);
+    },
+    getLightingMode() { return lightingMode; },
+    setLightingMode(mode) {
+      lightingMode = ['night', 'day', 'auto'].includes(mode) ? mode : 'night';
+      try { localStorage.setItem('house-control:lighting', lightingMode); } catch { /* ignore */ }
+      applyLightingEnvironment();
+      shadowFrames = Math.max(shadowFrames, 2);
+      wake(3);
+    },
     getCameraState() { return { az: rig.az, el: rig.el, zoom: rig.zoom, focus: rig.focus }; },
     setCameraState(s) {
       if (!s) return;

@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#141e38"/>
+      <stop offset="100%" stop-color="#090d18"/>
+    </linearGradient>
+    <linearGradient id="roof" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#5da0ff"/>
+      <stop offset="100%" stop-color="#366ce8"/>
+    </linearGradient>
+    <linearGradient id="glow" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffd56b"/>
+      <stop offset="100%" stop-color="#ff9338"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <!-- Isometric 3D House Base -->
+  <polygon points="256,112 412,202 256,292 100,202" fill="url(#roof)"/>
+  <polygon points="100,202 256,292 256,412 100,322" fill="#23335a"/>
+  <polygon points="412,202 256,292 256,412 412,322" fill="#182442"/>
+  <!-- Glowing Smart Windows -->
+  <polygon points="145,256 215,296 215,356 145,316" fill="url(#glow)"/>
+  <polygon points="297,296 367,256 367,316 297,356" fill="url(#glow)" opacity="0.9"/>
+  <!-- Smart Halo Ring -->
+  <circle cx="256" cy="202" r="24" fill="url(#glow)"/>
+</svg>

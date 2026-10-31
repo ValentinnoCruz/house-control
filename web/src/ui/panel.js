@@ -1,22 +1,25 @@
 // The control panel that lives in the menu bar popover: header, scenes, rooms,
-// device tiles and the detail sheets for a light or an AC.
+// device tiles and the detail sheets for a light, AC, Scene Builder, Schedules, or Phone QR.
 import * as THREE from 'three';
 import { h, clamp, createSlider, createColorPad, openMenu } from './dom.js';
 import { icon } from './icons.js';
+import { createQRCodeSVG } from './qr.js';
 import { lightColor } from '../three/lights.js';
 import { MODE_COLORS } from '../three/ac.js';
 import { AC_SWINGS } from '../store.js';
-import { haptic, isPhone } from '../bridge.js';
+import { haptic, isPhone, call } from '../bridge.js';
 
 const MODE_LABEL = { cool: 'Cool', heat: 'Heat', dry: 'Dry', fan: 'Fan', auto: 'Auto' };
 const FAN_LABEL = { auto: 'Auto', low: 'Low', medium: 'Medium', high: 'High', turbo: 'Turbo' };
 const SWING_LABEL = { swing: 'Swing', l1: 'L1', l2: 'L2', l3: 'L3', l4: 'L4', l5: 'L5', off: 'Off' };
 const SWATCHES = ['#ff5a4f', '#ff9a3c', '#ffd84a', '#5fe08a', '#42d6e8', '#4f8dff', '#8b5cff', '#ff5fc4'];
+const SCENE_ICON_OPTIONS = ['sparkles', 'sun', 'moon', 'sofa', 'film', 'tv', 'bed', 'bulb'];
 
 const TEMP_GRADIENT = 'linear-gradient(90deg, #2f7df6 0%, #58b4f5 34%, #f3e2c0 62%, #f6a54a 82%, #f0762c 100%)';
 const DIM_GRADIENT = 'linear-gradient(90deg, #4a4f5e 0%, #b9a98c 45%, #ffe2b0 100%)';
 const KELVIN_GRADIENT = 'linear-gradient(90deg, #ff9438 0%, #ffbd7a 30%, #ffe2c2 62%, #dfe9ff 100%)';
 
+const FAV_STORAGE_KEY = 'house-control:favorites:v1';
 const NAVY = new THREE.Color('#17274f');
 const tmp = new THREE.Color();
 const css = (c) => `#${c.getHexString()}`;
@@ -37,6 +40,29 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
   let world = null;
   const roomName = new Map(config.rooms.map((r) => [r.id, r.name]));
 
+  // Load pinned Quick Favorites from localStorage
+  let favorites = new Set();
+  try {
+    const savedFavs = JSON.parse(localStorage.getItem(FAV_STORAGE_KEY) || 'null');
+    if (Array.isArray(savedFavs)) {
+      favorites = new Set(savedFavs.filter((id) => config.lights.some((l) => l.id === id)));
+    }
+  } catch { /* ignore */ }
+
+  function saveFavorites() {
+    try {
+      localStorage.setItem(FAV_STORAGE_KEY, JSON.stringify([...favorites]));
+    } catch { /* ignore */ }
+  }
+
+  function toggleFavorite(id) {
+    if (favorites.has(id)) favorites.delete(id);
+    else favorites.add(id);
+    saveFavorites();
+    layoutTiles();
+    update();
+  }
+
   /* ---------- skeleton ---------- */
 
   const canvas = h('canvas', { tabindex: -1 });
@@ -50,7 +76,6 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
   const power = h('button.round.power', { title: 'Everything on / off', 'aria-label': 'Toggle everything', onclick: toggleEverything }, icon('power', 21, 2.2));
   const editPlanBtn = h('button.round', { title: 'Open 2D Floor Plan Editor', 'aria-label': 'Open 2D Floor Plan Editor', onclick: () => { location.href = `${location.pathname}?mode=editor`; } }, icon('box', 16));
   const gear = h('button.round', { title: 'Menu & views', 'aria-label': 'Floor plan menu', onclick: () => onMenu(gear) }, icon('settings', 17));
-  // Shown while an AI assistant has a link to this home (AI Access on the Mac).
   const aiBadge = h('button.ai-badge', { hidden: true, title: 'An AI assistant has access — click to manage', 'aria-label': 'AI access',
     onclick: () => onMenu(aiBadge, 'agent') }, icon('sparkles', 13, 2.2), h('span', 'AI'));
 
@@ -88,19 +113,83 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
     },
   }, 'Rooms ▾');
 
+  const cutawayBtn = h('button.pill.tiny', {
+    title: 'Cycle Sims-style 3D wall cutaway (Auto Cutaway → Low Walls → Full Walls)',
+    onclick: () => {
+      if (!world) return;
+      const cur = world.getCutawayMode?.() || 'auto';
+      const next = cur === 'auto' ? 'low' : cur === 'low' ? 'full' : 'auto';
+      world.setCutawayMode?.(next);
+      updateEnvButtons();
+      toast(next === 'auto' ? 'Walls: Sims-style auto cutaway' : next === 'low' ? 'Walls: All lowered for unobstructed clicking' : 'Walls: Full height');
+    },
+  }, 'Walls: Auto');
+
+  const skyBtn = h('button.pill.tiny', {
+    title: 'Cycle 3D lighting environment (Night → Day → Auto Local Time)',
+    onclick: () => {
+      if (!world) return;
+      const cur = world.getLightingMode?.() || 'night';
+      const next = cur === 'night' ? 'day' : cur === 'day' ? 'auto' : 'night';
+      world.setLightingMode?.(next);
+      updateEnvButtons();
+      toast(next === 'night' ? '3D Sky: Night mode' : next === 'day' ? '3D Sky: Daylight mode' : '3D Sky: Auto synced with local clock');
+    },
+  }, 'Sky: Night');
+
+  const schedulesBtn = h('button.pill.tiny', {
+    title: 'Manage automated light schedules & sunset timers',
+    onclick: () => openSheet({ kind: 'schedules' }),
+  }, icon('clock', 12), 'Schedules');
+
+  const qrBtn = h('button.pill.tiny', {
+    title: 'Scan QR code to open on your phone over Wi-Fi',
+    onclick: () => openSheet({ kind: 'phoneQr' }),
+  }, icon('qr', 12), 'Phone QR');
+
+  const syncBtn = h('button.pill.tiny', {
+    title: 'Poll live Govee device status now',
+    onclick: async () => {
+      syncBtn.textContent = 'Syncing…';
+      try {
+        const res = await call('devices.syncNow');
+        if (res?.lights && Object.keys(res.lights).length) {
+          store.applyRemote({ lights: res.lights });
+        }
+        toast(`Synced ${res?.synced ?? 0} linked Govee device(s)`);
+      } catch (e) {
+        toast(`Sync error: ${e.message}`);
+      } finally {
+        syncBtn.textContent = 'Sync';
+      }
+    },
+  }, 'Sync');
+
   const toggleDrawerBtn = h('button.pill.tiny', {
     onclick: () => {
       panelMinimized = !panelMinimized;
       card.classList.toggle('panel-minimized', panelMinimized);
-      toggleDrawerBtn.textContent = panelMinimized ? 'Expand panel ▲' : 'Minimize ▼';
+      toggleDrawerBtn.textContent = panelMinimized ? 'Expand ▲' : 'Minimize ▼';
       setTimeout(() => world?.resize(), 50);
     },
   }, 'Minimize ▼');
 
+  function updateEnvButtons() {
+    const cMode = world?.getCutawayMode?.() || localStorage.getItem('house-control:cutaway') || 'auto';
+    cutawayBtn.textContent = cMode === 'auto' ? 'Walls: Auto' : cMode === 'low' ? 'Walls: Low' : 'Walls: Full';
+    const lMode = world?.getLightingMode?.() || localStorage.getItem('house-control:lighting') || 'night';
+    skyBtn.textContent = lMode === 'night' ? 'Sky: Night' : lMode === 'day' ? 'Sky: Day' : 'Sky: Auto';
+  }
+
   const navBar = h('div.panel-nav-toggles',
     toggleScenesBtn,
     toggleRoomsBtn,
-    h('button.pill.tiny', { onclick: () => { location.href = `${location.pathname}?mode=editor`; } }, '2D Floor Plan ↗'),
+    cutawayBtn,
+    skyBtn,
+    schedulesBtn,
+    qrBtn,
+    syncBtn,
+    h('button.pill.tiny', { onclick: () => { location.href = `${location.pathname}?mode=editor`; } }, '2D Plan ↗'),
     toggleDrawerBtn);
 
   const panel = h('section.panel',
@@ -126,15 +215,29 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
   const card = h('div.card.booting', h('div.notch'), clip);
   root.replaceChildren(card);
 
-  /* ---------- scenes ---------- */
+  /* ---------- scenes + Custom Scene Builder ---------- */
 
   const sceneButtons = new Map();
-  for (const s of config.scenes) {
-    const b = h('button.scene', { onclick: () => { haptic('medium'); store.applyScene(s.id); } }, icon(s.icon, 19), s.name);
-    sceneButtons.set(s.id, b);
-    scenes.append(b);
+  function renderScenesBar() {
+    sceneButtons.clear();
+    const nodes = [];
+    for (const s of config.scenes) {
+      const b = h('button.scene', {
+        onclick: () => { haptic('medium'); store.applyScene(s.id); },
+      }, icon(s.icon, 19), s.name);
+      sceneButtons.set(s.id, b);
+      nodes.push(b);
+    }
+    const saveSceneBtn = h('button.scene.scene-add', {
+      title: 'Save current light colors & brightness as a 1-tap scene',
+      onclick: () => { haptic('light'); openSheet({ kind: 'sceneBuilder' }); },
+    }, icon('plus', 17, 2.2), 'Save Scene');
+    nodes.push(saveSceneBtn);
+    scenes.replaceChildren(...nodes);
+    scenes.style.display = '';
+    for (const [id, b] of sceneButtons) b.classList.toggle('active', state.scene === id);
   }
-  if (!config.scenes.length) scenes.style.display = 'none';
+  renderScenesBar();
 
   /* ---------- rooms ---------- */
 
@@ -181,13 +284,18 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
 
   const tiles = new Map();
 
-  function lightTile(cfg) {
+  function buildLightTileElement(cfg, isFavCopy = false) {
     const dimmable = cfg.capabilities.includes('brightness');
     const hasSheet = cfg.capabilities.length > 0;
     const sub = h('div.tile-sub');
+    const favBtn = h(`button.tile-fav${favorites.has(cfg.id) ? '.active' : ''}`, {
+      title: favorites.has(cfg.id) ? 'Remove from Quick Favorites' : 'Pin to Quick Favorites',
+      'aria-label': 'Favorite',
+      onclick: (e) => { e.stopPropagation(); haptic('light'); toggleFavorite(cfg.id); },
+    }, icon('star', 13, 2.2));
     const more = hasSheet
       ? h('button.tile-more', {
-        title: `${cfg.name} colour & brightness`,
+        title: `${cfg.name} colour, effects & brightness`,
         'aria-label': `${cfg.name} settings`,
         onclick: (e) => { e.stopPropagation(); openSheet({ kind: 'light', id: cfg.id }); },
       }, icon('sliders', 16, 2.2))
@@ -196,16 +304,16 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
       title: `Toggle ${cfg.name}`,
       onclick: (e) => { e.stopPropagation(); toggleLight(cfg.id); },
     }, icon(cfg.capabilities.length ? cfg.type : 'plug', 19));
-    const el = h(`div.tile${dimmable ? '.dimmable' : ''}`, { role: 'button', tabindex: 0, 'aria-label': cfg.name },
+    const el = h(`div.tile${dimmable ? '.dimmable' : ''}${isFavCopy ? '.fav-tile' : ''}`, { role: 'button', tabindex: 0, 'aria-label': cfg.name },
       bubbleBtn,
       h('div.tile-text', h('div.tile-name', cfg.name), sub),
+      favBtn,
       more,
       h('div.tile-level'));
 
-    // Tap toggles; dragging sideways dims (HomeKit-style).
     let gesture = null;
     el.addEventListener('pointerdown', (ev) => {
-      if (ev.target.closest('.tile-more') || ev.target.closest('.bubble') || ev.button !== 0) return;
+      if (ev.target.closest('.tile-more') || ev.target.closest('.tile-fav') || ev.target.closest('.bubble') || ev.button !== 0) return;
       el.setPointerCapture(ev.pointerId);
       const s = state.lights[cfg.id];
       gesture = { x: ev.clientX, y: ev.clientY, start: s.on ? s.brightness : 0, moved: false, step: null };
@@ -224,7 +332,6 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
       if (!gesture) return;
       const dx = ev.clientX - gesture.x;
       if (Math.hypot(dx, ev.clientY - gesture.y) > 14) clearTimeout(gesture.hold);
-      // Require an intentional 18px horizontal drag so normal clicks/taps always toggle reliably.
       if (!gesture.moved && dimmable && Math.abs(dx) > 18 && Math.abs(dx) > Math.abs(ev.clientY - gesture.y) * 1.4) {
         gesture.moved = true;
         el.classList.add('dragging');
@@ -257,8 +364,8 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
         el.classList.toggle('on', s.on);
         el.style.setProperty('--c', css(lightColor(s, tmp)));
         el.style.setProperty('--level', s.on ? String(s.brightness) : '0');
-        // On a phone the group heading above the tile already names the room.
-        sub.textContent = ui.room === 'all' && !isPhone ? `${lightStatus(cfg, s)} · ${roomName.get(cfg.room)}` : lightStatus(cfg, s);
+        favBtn.classList.toggle('active', favorites.has(cfg.id));
+        sub.textContent = (ui.room === 'all' || isFavCopy) && !isPhone ? `${lightStatus(cfg, s)} · ${roomName.get(cfg.room)}` : lightStatus(cfg, s);
       },
     };
   }
@@ -296,8 +403,12 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
     };
   }
 
+  const favTiles = new Map();
   for (const cfg of config.acs) tiles.set(cfg.id, acTile(cfg));
-  for (const cfg of config.lights) tiles.set(cfg.id, lightTile(cfg));
+  for (const cfg of config.lights) {
+    tiles.set(cfg.id, buildLightTileElement(cfg, false));
+    favTiles.set(cfg.id, buildLightTileElement(cfg, true));
+  }
 
   function toggleLight(id) {
     haptic('light');
@@ -315,6 +426,29 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
       collapseAllBtn.textContent = allClosed ? 'Expand all' : 'Collapse all';
       collapseAllBtn.style.display = ui.room === 'all' ? '' : 'none';
     }
+
+    // Touch-first Quick Favorites bar at the top when viewing Whole Home
+    if (ui.room === 'all' && favorites.size > 0) {
+      const favList = [...favorites].map((id) => favTiles.get(id)).filter(Boolean);
+      if (favList.length) {
+        const isFavClosed = collapsedRooms.has('__favorites__');
+        nodes.push(h('button.group-label.collapsible.fav-group-label', {
+          onclick: () => {
+            if (collapsedRooms.has('__favorites__')) collapsedRooms.delete('__favorites__');
+            else collapsedRooms.add('__favorites__');
+            layoutTiles();
+          },
+        },
+          icon(isFavClosed ? 'next' : 'down', 12, 2.4),
+          icon('star', 13, 2.2),
+          h('span', 'Quick Favorites'),
+          h('small.group-count', `${favList.length}`)));
+        if (!isFavClosed) {
+          favList.forEach((ft) => { ft.update(); add(ft); });
+        }
+      }
+    }
+
     for (const room of config.rooms) {
       if (ui.room !== 'all' && room.id !== ui.room) continue;
       const devices = [...tiles.values()].filter((t) => t.cfg.room === room.id);
@@ -341,7 +475,7 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
     }
     if (!nodes.length) nodes.push(h('div.group-label', 'No devices in this room yet'));
     else if (isPhone && config.lights.some((l) => l.capabilities.length && inScope(l))) {
-      nodes.push(h('div.grid-hint', 'Touch and hold a light for brightness and colour'));
+      nodes.push(h('div.grid-hint', 'Touch and hold a light for brightness, effects and colour'));
     }
     grid.replaceChildren(...nodes);
   }
@@ -352,7 +486,12 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
 
   function openSheet(target) {
     ui.sheet = target;
-    sheetView = target.kind === 'ac' ? acSheet(target.id) : lightSheet(target.id);
+    if (target.kind === 'ac') sheetView = acSheet(target.id);
+    else if (target.kind === 'light') sheetView = lightSheet(target.id);
+    else if (target.kind === 'sceneBuilder') sheetView = sceneBuilderSheet();
+    else if (target.kind === 'schedules') sheetView = schedulesSheet();
+    else if (target.kind === 'phoneQr') sheetView = phoneQrSheet();
+    if (!sheetView) return;
     sheet.replaceChildren(...sheetView.nodes);
     panel.classList.add('hidden');
     sheet.classList.remove('hidden');
@@ -360,7 +499,10 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
     sheet.inert = false;
     card.classList.add('detail');
     hideTooltip();
-    onFocus(target.kind === 'ac' ? target : { kind: 'room', id: store.lightCfg.get(target.id).room });
+    if (target.kind === 'ac') onFocus(target);
+    else if (target.kind === 'light' && store.lightCfg.get(target.id)) {
+      onFocus({ kind: 'room', id: store.lightCfg.get(target.id).room });
+    }
     update();
   }
 
@@ -378,11 +520,11 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
     return true;
   }
 
-  function sheetHead(name, sub, powerBtn) {
+  function sheetHead(name, sub, rightBtn = h('span')) {
     return h('div.sheet-head',
       h('button.round', { 'aria-label': 'Back', onclick: closeSheet }, icon('back', 19, 2.2)),
       h('div.sheet-title', h('div.sheet-name', name), sub),
-      powerBtn);
+      rightBtn);
   }
 
   function bigNumber(unit) {
@@ -402,6 +544,269 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
         num.textContent = value;
         shown = value;
       },
+    };
+  }
+
+  /* ---------- Custom Scene Builder Sheet ---------- */
+
+  function sceneBuilderSheet() {
+    const sub = h('div.sheet-sub', 'Capture your current live lighting as a 1-tap scene');
+    const nameInput = h('input.sheet-input', { type: 'text', placeholder: 'e.g. Gaming, Dinner, Late Night…', value: '' });
+    let chosenIcon = 'sparkles';
+    let scope = 'all'; // 'all' | 'room'
+
+    const iconRow = h('div.scene-icon-picker');
+    const renderIcons = () => {
+      iconRow.replaceChildren(...SCENE_ICON_OPTIONS.map((ic) =>
+        h(`button.pill${chosenIcon === ic ? '.active' : ''}`, {
+          onclick: () => { chosenIcon = ic; renderIcons(); },
+        }, icon(ic, 16), ic)
+      ));
+    };
+    renderIcons();
+
+    const scopeRow = h('div.scene-scope-picker');
+    const renderScope = () => {
+      if (ui.room === 'all') {
+        scopeRow.replaceChildren(h('span.sheet-hint', `Captures all ${config.lights.length} active lights across the home.`));
+        return;
+      }
+      const rName = roomName.get(ui.room) || ui.room;
+      scopeRow.replaceChildren(
+        h(`button.pill${scope === 'all' ? '.active' : ''}`, { onclick: () => { scope = 'all'; renderScope(); } }, 'Whole Home'),
+        h(`button.pill${scope === 'room' ? '.active' : ''}`, { onclick: () => { scope = 'room'; renderScope(); } }, `Only ${rName}`),
+      );
+    };
+    renderScope();
+
+    const customList = h('div.custom-scenes-list');
+    const renderCustomScenes = () => {
+      if (!config.scenes.length) {
+        customList.replaceChildren();
+        return;
+      }
+      customList.replaceChildren(
+        h('div.field-label', h('span', 'Saved Scenes (tap Update to overwrite with current lights)')),
+        ...config.scenes.map((sc) => h('div.sched-row',
+          h('div.sched-main', icon(sc.icon || 'sparkles', 16), h('b', sc.name)),
+          h('div.sched-actions',
+            h('button.pill.tiny', {
+              title: `Overwrite "${sc.name}" with current light states`,
+              onclick: async () => {
+                await saveCurrentAsScene(sc.name, sc.icon || 'sparkles', sc.id);
+              },
+            }, 'Update'),
+            config.scenes.length > 1 ? h('button.pill.tiny.danger', {
+              title: `Delete "${sc.name}"`,
+              onclick: async () => {
+                try {
+                  await call('scene.delete', { id: sc.id });
+                  const idx = config.scenes.findIndex((x) => x.id === sc.id);
+                  if (idx >= 0) config.scenes.splice(idx, 1);
+                  renderScenesBar();
+                  renderCustomScenes();
+                  toast(`Deleted scene "${sc.name}"`);
+                } catch (e) {
+                  toast(`Could not delete scene: ${e.message}`);
+                }
+              },
+            }, icon('trash', 12)) : null
+          )
+        ))
+      );
+    };
+    renderCustomScenes();
+
+    async function saveCurrentAsScene(rawName, iconName, existingId = null) {
+      const cleanName = String(rawName || '').trim();
+      if (!cleanName) {
+        toast('Enter a name for your scene first');
+        nameInput.focus();
+        return;
+      }
+      const id = existingId || cleanName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || `scene-${Date.now()}`;
+      const lightsMap = {};
+      for (const l of config.lights) {
+        if (scope === 'room' && ui.room !== 'all' && l.room !== ui.room) continue;
+        const cur = state.lights[l.id];
+        if (!cur) continue;
+        const entry = { on: Boolean(cur.on) };
+        if (cur.on) {
+          if (l.capabilities.includes('brightness')) entry.brightness = Math.round(cur.brightness * 100) / 100;
+          if (cur.color && l.capabilities.includes('color')) entry.color = cur.color;
+          else if (cur.temp && l.capabilities.includes('temp')) entry.temp = cur.temp;
+        }
+        lightsMap[l.id] = entry;
+      }
+      const sceneObj = { id, name: cleanName, icon: iconName, custom: true, lights: lightsMap, acs: {} };
+      try {
+        await call('scene.save', { scene: sceneObj });
+        const existingIdx = config.scenes.findIndex((s) => s.id === id);
+        if (existingIdx >= 0) config.scenes[existingIdx] = sceneObj;
+        else config.scenes.push(sceneObj);
+        state.scene = id;
+        renderScenesBar();
+        toast(`Saved scene "${cleanName}"`);
+        closeSheet();
+      } catch (e) {
+        toast(`Failed to save scene: ${e.message}`);
+      }
+    }
+
+    const saveBtn = h('button.pill.primary-pill', {
+      onclick: () => saveCurrentAsScene(nameInput.value, chosenIcon),
+    }, icon('check', 15, 2.4), 'Save Current Lights as Scene');
+
+    return {
+      nodes: [
+        sheetHead('Scene Builder', sub),
+        h('div.sheet-body-scroll',
+          h('div.field-label', h('span', 'Scene Name')),
+          nameInput,
+          h('div.field-label', h('span', 'Icon')),
+          iconRow,
+          scopeRow,
+          saveBtn,
+          customList),
+      ],
+      update() {},
+    };
+  }
+
+  /* ---------- Smart Schedules & Sunset Automation Sheet ---------- */
+
+  function schedulesSheet() {
+    const sub = h('div.sheet-sub', 'Automate scenes or rooms by time of day or local sunset');
+    const body = h('div.sheet-body-scroll', h('div.sheet-note', 'Loading schedules…'));
+
+    const DAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+
+    async function loadAndRender() {
+      try {
+        const data = await call('schedules.list');
+        const list = data?.schedules || [];
+        const sun = data?.sun || { sunrise: '06:30', sunset: '18:45' };
+
+        const nameIn = h('input.sheet-input', { type: 'text', placeholder: 'Schedule name (e.g. Sunset Porch)' });
+        const triggerSel = h('select.sheet-select',
+          h('option', { value: 'sunset' }, `At Sunset (~${sun.sunset})`),
+          h('option', { value: 'sunrise' }, `At Sunrise (~${sun.sunrise})`),
+          h('option', { value: 'time' }, 'At Specific Time'));
+        const timeIn = h('input.sheet-input', { type: 'time', value: '20:00', style: { display: 'none' } });
+        triggerSel.addEventListener('change', () => {
+          timeIn.style.display = triggerSel.value === 'time' ? '' : 'none';
+        });
+
+        const actionSel = h('select.sheet-select',
+          ...config.scenes.map((s) => h('option', { value: `scene:${s.id}` }, `Scene: ${s.name}`)),
+          h('option', { value: 'all_off:' }, 'Turn All Lights Off'),
+          h('option', { value: 'all_on:' }, 'Turn All Lights On'),
+          ...roomsWithLights.map((r) => h('option', { value: `room_on:${r.id}` }, `Room On: ${r.name}`)),
+          ...roomsWithLights.map((r) => h('option', { value: `room_off:${r.id}` }, `Room Off: ${r.name}`)));
+
+        const addBtn = h('button.pill.primary-pill', {
+          onclick: async () => {
+            const [act, targetId] = actionSel.value.split(':');
+            const name = nameIn.value.trim() || actionSel.options[actionSel.selectedIndex].text;
+            await call('schedules.save', {
+              schedule: {
+                name,
+                enabled: true,
+                trigger: triggerSel.value,
+                time: timeIn.value || '20:00',
+                days: [0, 1, 2, 3, 4, 5, 6],
+                action: act,
+                targetId: targetId || '',
+              },
+            });
+            toast(`Added schedule "${name}"`);
+            loadAndRender();
+          },
+        }, icon('plus', 15, 2.4), 'Add Schedule');
+
+        body.replaceChildren(
+          h('div.sun-banner',
+            h('span', icon('sun', 15), ` Sunrise today: ${sun.sunrise}`),
+            h('span', icon('moon', 15), ` Sunset today: ${sun.sunset}`)),
+          h('div.field-label', h('span', `Saved Schedules (${list.length})`)),
+          ...list.map((s) => {
+            const whenLabel = s.trigger === 'sunset'
+              ? `Sunset (${sun.sunset})`
+              : s.trigger === 'sunrise'
+                ? `Sunrise (${sun.sunrise})`
+                : s.time;
+            return h(`div.sched-row${s.enabled ? '.on' : ''}`,
+              h('div.sched-main',
+                h('b', s.name),
+                h('span', `${whenLabel} · ${DAYS.filter((_, i) => (s.days || []).includes(i)).join(' ')}`)),
+              h('div.sched-actions',
+                h(`button.pill.tiny${s.enabled ? '.active' : ''}`, {
+                  onclick: async () => {
+                    await call('schedules.toggle', { id: s.id });
+                    loadAndRender();
+                  },
+                }, s.enabled ? 'Enabled' : 'Paused'),
+                h('button.pill.tiny', {
+                  title: 'Test / run this schedule right now',
+                  onclick: async () => {
+                    await call('schedules.runNow', { id: s.id });
+                    toast(`Triggered "${s.name}"`);
+                  },
+                }, icon('play', 11), 'Run'),
+                h('button.pill.tiny.danger', {
+                  title: 'Delete schedule',
+                  onclick: async () => {
+                    await call('schedules.delete', { id: s.id });
+                    loadAndRender();
+                  },
+                }, icon('trash', 12))));
+          }),
+          h('div.field-label', h('span', 'Create New Schedule')),
+          nameIn,
+          h('div.sched-form-row', triggerSel, timeIn, actionSel),
+          addBtn
+        );
+      } catch (e) {
+        body.replaceChildren(h('div.sheet-note', `Could not load schedules: ${e.message}`));
+      }
+    }
+    loadAndRender();
+
+    return {
+      nodes: [sheetHead('Schedules & Timers', sub), body],
+      update() {},
+    };
+  }
+
+  /* ---------- Phone Wi-Fi QR Code & PWA Sheet ---------- */
+
+  function phoneQrSheet() {
+    const lanIp = window.__HOUSE_BOOT__?.lan?.ip || location.hostname;
+    const mobileUrl = window.__HOUSE_BOOT__?.lan?.mobileUrl || `http://${lanIp}:5199/?platform=ios`;
+    const sub = h('div.sheet-sub', 'Scan with your iPhone or Android camera on the same Wi-Fi');
+    const qrSvg = createQRCodeSVG(mobileUrl, 172);
+
+    return {
+      nodes: [
+        sheetHead('Phone Access & Web App', sub),
+        h('div.sheet-body-scroll.qr-sheet-body',
+          h('div.qr-card', qrSvg),
+          h('code.qr-url', mobileUrl),
+          h('div.qr-actions',
+            h('button.pill.primary-pill', {
+              onclick: () => {
+                navigator.clipboard?.writeText(mobileUrl).catch(() => {});
+                toast(`Copied ${mobileUrl}`);
+              },
+            }, icon('copy', 14), 'Copy Phone Link'),
+            h('button.pill', {
+              onclick: () => { location.href = `${location.pathname}?platform=ios`; },
+            }, icon('phone', 14), 'Preview Mobile UI')),
+          h('div.sheet-note',
+            h('b', 'Install as Full-Screen App (PWA): '),
+            'After scanning on your phone, tap Share → "Add to Home Screen" in iOS Safari (or "Install App" in Android Chrome) for a native full-screen smart home app.')),
+      ],
+      update() {},
     };
   }
 
@@ -466,7 +871,6 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
       ],
       update() {
         const a = s();
-        // A real AC only shows the controls it has a function for.
         const f = features();
         const shown = [[mode.el, f.modes.length > 0], [fan.el, f.fans.length > 0], [sleep, f.sleep], [swing.el, f.swing]];
         for (const [el, on] of shown) el.hidden = !on;
@@ -491,9 +895,14 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
     const set = (patch) => store.setLight(id, patch);
     const caps = cfg.capabilities;
     const sub = h('div.sheet-sub');
+    const favBtn = h(`button.round${favorites.has(id) ? '.on' : ''}`, {
+      title: favorites.has(id) ? 'Remove from Quick Favorites' : 'Pin to Quick Favorites',
+      onclick: () => { haptic('light'); toggleFavorite(id); favBtn.classList.toggle('on', favorites.has(id)); },
+    }, icon('star', 18, 2.2));
     const powerBtn = h('button.round.power', { 'aria-label': 'Power', onclick: () => toggleLight(id) }, icon('power', 21, 2.2));
+    const headActions = h('div.sheet-head-actions', favBtn, powerBtn);
     const big = bigNumber('%');
-    const nodes = [sheetHead(cfg.name, sub, powerBtn), h('div.readout', big.el)];
+    const nodes = [sheetHead(cfg.name, sub, headActions), h('div.readout', big.el)];
     const sliders = {};
 
     if (caps.includes('brightness')) {
@@ -523,6 +932,34 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
       pad = createColorPad({ value: s().color, onInput: (c) => set({ on: true, color: c }) });
       swatches = SWATCHES.map((c) => h('button.swatch', { 'aria-label': `Colour ${c}`, vars: { '--sw': c }, onclick: () => { haptic('light'); set({ on: true, color: c }); } }));
       nodes.push(h('div.field-label', h('span', 'Colour'), colorLabel), pad.el, h('div.swatches', swatches));
+
+      // Govee Native Dynamic Scenes & Mood Effects
+      const effectsRow = h('div.dynamic-effects-row', h('span.sheet-hint', 'Loading effects…'));
+      nodes.push(h('div.field-label', h('span', 'Dynamic & Mood Effects'), h('span', 'Govee / RGB')), effectsRow);
+      call('govee.scenes', { id }).then((res) => {
+        const list = res?.scenes || [];
+        if (!list.length) {
+          effectsRow.replaceChildren();
+          return;
+        }
+        effectsRow.replaceChildren(...list.map((eff) =>
+          h(`button.pill.tiny.effect-pill${eff.kind === 'cloud' ? '.cloud-effect' : ''}`, {
+            onclick: async () => {
+              haptic('medium');
+              try {
+                const r = await call('govee.applyScene', { id, effect: eff });
+                if (r?.patch) store.applyRemote({ lights: { [id]: r.patch } });
+                toast(`${cfg.name}: ${eff.name}`);
+              } catch (e) {
+                if (eff.color) set({ on: true, color: eff.color, brightness: eff.brightness || 0.8 });
+                else if (eff.temp) set({ on: true, temp: eff.temp, brightness: eff.brightness || 0.7 });
+              }
+            },
+          }, icon('sparkles', 11), eff.name)
+        ));
+      }).catch(() => {
+        effectsRow.replaceChildren();
+      });
     } else {
       nodes.push(h('div.sheet-note', icon(cfg.type, 20),
         `${roomName.get(cfg.room)} · drag across a light tile to dim it, or ${isPhone ? 'tap' : 'click'} the lamp in the 3D view to toggle.`));
@@ -533,6 +970,7 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
       update() {
         const l = s();
         powerBtn.classList.toggle('on', l.on);
+        favBtn.classList.toggle('on', favorites.has(id));
         sub.replaceChildren(roomName.get(cfg.room), ' · ', h('b', l.on ? 'On' : 'Off'));
         big.set(caps.includes('brightness') ? Math.round(l.brightness * 100) : l.on ? 100 : 0, !l.on);
         sliders.brightness?.set(Math.round(l.brightness * 100));
@@ -622,9 +1060,18 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
     listTitle.replaceChildren(h('b', ui.room === 'all' ? 'Whole home' : roomName.get(ui.room)), ` · ${scopedOn} of ${scoped.length} on`);
 
     for (const t of tiles.values()) t.update();
+    for (const ft of favTiles.values()) ft.update();
     sheetView?.update();
     const m = css(mood());
     card.style.setProperty('--mood', m);
+  }
+
+  function toast(text, ai = null) {
+    toastEl.replaceChildren(...(ai ? [h('span.toast-ai', icon('sparkles', 13, 2.2), ai), h('span', text)] : [text]));
+    toastEl.classList.toggle('ai', Boolean(ai));
+    toastEl.classList.add('show');
+    clearTimeout(toastEl.timer);
+    toastEl.timer = setTimeout(() => toastEl.classList.remove('show'), 3200);
   }
 
   store.on(() => update());
@@ -638,7 +1085,7 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
   return {
     canvas,
     card,
-    attach(w) { world = w; card.classList.remove('booting'); },
+    attach(w) { world = w; card.classList.remove('booting'); updateEnvButtons(); },
     showTooltip,
     openSheet,
     closeSheet,
@@ -647,14 +1094,7 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
     get room() { return ui.room; },
     setNotch(x) { card.style.setProperty('--notch-x', `${x}px`); },
     setAgentLive(live) { aiBadge.hidden = !live; },
-    /** `ai`: something an AI assistant did (who, what), instead of an error. */
-    toast(text, ai = null) {
-      toastEl.replaceChildren(...(ai ? [h('span.toast-ai', icon('sparkles', 13, 2.2), ai), h('span', text)] : [text]));
-      toastEl.classList.toggle('ai', Boolean(ai));
-      toastEl.classList.add('show');
-      clearTimeout(toastEl.timer);
-      toastEl.timer = setTimeout(() => toastEl.classList.remove('show'), 3200);
-    },
+    toast,
     anchorMenu: clip,
   };
 }
