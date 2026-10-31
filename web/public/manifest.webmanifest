@@ -1,0 +1,35 @@
+{
+  "name": "House Control — 3D Smart Home",
+  "short_name": "House Control",
+  "description": "Interactive 3D Smart Home Control Panel, Floor Plan Editor, and Govee / Home Assistant / Hue Bridge",
+  "start_url": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0a0e1a",
+  "theme_color": "#0a0e1a",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "3D Control Panel",
+      "short_name": "Control",
+      "url": "./"
+    },
+    {
+      "name": "Floor Plan Editor",
+      "short_name": "Editor",
+      "url": "./?mode=editor"
+    },
+    {
+      "name": "Mobile View",
+      "short_name": "Mobile",
+      "url": "./?platform=ios"
+    }
+  ]
+}

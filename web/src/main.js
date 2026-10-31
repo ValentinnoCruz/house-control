@@ -160,7 +160,9 @@ async function boot() {
       });
     }
     items.push('-',
-      { label: 'Edit Home (2D & 3D Floor Plan Editor)…', action: () => { location.href = `${location.pathname}?mode=editor`; } },
+      { label: 'Save Current Lights as Scene…', icon: icon('sparkles', 15), action: () => panel.openSheet({ kind: 'sceneBuilder' }) },
+      { label: 'Schedules & Sunset Timers…', icon: icon('clock', 15), action: () => panel.openSheet({ kind: 'schedules' }) },
+      { label: 'Edit Home (2D & 3D Floor Plan Editor)…', icon: icon('box', 15), action: () => { location.href = `${location.pathname}?mode=editor`; } },
       { label: 'Load Floor Plan File (.json)…', action: () => {
         const input = h('input', { type: 'file', accept: 'application/json,.json' });
         input.addEventListener('change', async () => {
@@ -177,11 +179,7 @@ async function boot() {
       } },
       { label: 'Connections (Govee, Home Assistant, Hue)…', action: () => { location.href = `${location.pathname}?mode=editor&section=connections`; } },
       { label: 'Show Dynamic Island View…', action: () => { location.href = `${location.pathname}?mode=island&expanded=1`; } },
-      { label: 'Pair Phone / Copy Home Wi-Fi Link…', action: () => {
-        const lanUrl = window.__HOUSE_BOOT__?.lan?.panelUrl || `http://${location.hostname}:5199/`;
-        navigator.clipboard?.writeText(lanUrl).catch(() => {});
-        panel.toast(`Copied phone Wi-Fi link: ${lanUrl}`);
-      } },
+      { label: 'Pair Phone / Show Wi-Fi QR Code…', icon: icon('qr', 15), action: () => panel.openSheet({ kind: 'phoneQr' }) },
       { label: 'iPhone / Mobile View…', action: () => { location.href = `${location.pathname}?platform=ios`; } },
       { label: 'AI Access…', action: () => { location.href = `${location.pathname}?mode=agent`; } },
       { label: 'Reveal Plan File in Explorer', action: () => post('revealPlan') },

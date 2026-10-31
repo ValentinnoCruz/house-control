@@ -26,13 +26,18 @@ const PORT = Number(process.env.BACKEND_PORT || 5200);
 // ---------------------------------------------------------------------------
 // Data files
 // ---------------------------------------------------------------------------
+const BACKUPS_DIR = path.join(DATA_DIR, 'backups');
+fs.mkdirSync(BACKUPS_DIR, { recursive: true });
+
 const FILES = {
   plan: path.join(DATA_DIR, 'plan.json'),
+  defaultHomePlan: path.join(ROOT_DIR, 'web', 'public', 'plans', 'home.json'),
   settings: path.join(DATA_DIR, 'settings.json'),
   govee: path.join(DATA_DIR, 'govee.json'),
   homeassistant: path.join(DATA_DIR, 'homeassistant.json'),
   hue: path.join(DATA_DIR, 'hue.json'),
   tuya: path.join(DATA_DIR, 'tuya.json'),
+  schedules: path.join(DATA_DIR, 'schedules.json'),
   log: path.join(DATA_DIR, 'events.log'),
 };
 
@@ -59,7 +64,7 @@ function logEvent(line) {
 }
 
 // ---------------------------------------------------------------------------
-// Plan Store
+// Plan Store + Automatic Snapshot Backups
 // ---------------------------------------------------------------------------
 class PlanStore {
   constructor() {
@@ -78,6 +83,11 @@ class PlanStore {
     return readJSON(FILES.plan, null);
   }
 
+  currentPlanObject() {
+    if (this.hasCustomPlan) return this.customPlan();
+    return readJSON(FILES.defaultHomePlan, { name: 'Home', rooms: [], lights: [], acs: [], furniture: [], scenes: [] });
+  }
+
   select(plan) {
     if (!['home', 'studio', 'custom'].includes(plan)) return;
     if (plan === 'custom' && !this.hasCustomPlan) return;
@@ -85,11 +95,79 @@ class PlanStore {
     writeJSON(FILES.settings, { plan });
   }
 
-  saveCustom(config) {
+  createSnapshot(config, reason = 'Auto-save') {
+    try {
+      const now = new Date();
+      const id = `plan-${now.toISOString().replace(/[:.]/g, '-')}.json`;
+      const payload = {
+        id,
+        timestamp: now.toISOString(),
+        reason,
+        name: config.name || 'Home',
+        roomsCount: (config.rooms || []).length,
+        furnitureCount: (config.furniture || []).length,
+        lightsCount: (config.lights || []).length,
+        config,
+      };
+      writeJSON(path.join(BACKUPS_DIR, id), payload);
+      // Prune to most recent 25 snapshots
+      const files = fs.readdirSync(BACKUPS_DIR)
+        .filter((f) => f.startsWith('plan-') && f.endsWith('.json'))
+        .sort()
+        .reverse();
+      for (const old of files.slice(25)) {
+        try { fs.unlinkSync(path.join(BACKUPS_DIR, old)); } catch { /* ignore */ }
+      }
+    } catch (e) {
+      console.warn('[PlanStore] Failed to write snapshot backup:', e.message);
+    }
+  }
+
+  listBackups() {
+    try {
+      const files = fs.readdirSync(BACKUPS_DIR)
+        .filter((f) => f.startsWith('plan-') && f.endsWith('.json'))
+        .sort()
+        .reverse();
+      return files.map((f) => {
+        const data = readJSON(path.join(BACKUPS_DIR, f), null);
+        if (!data) return null;
+        return {
+          id: data.id || f,
+          timestamp: data.timestamp,
+          reason: data.reason || 'Snapshot',
+          name: data.name || 'Home',
+          roomsCount: data.roomsCount ?? (data.config?.rooms?.length || 0),
+          furnitureCount: data.furnitureCount ?? (data.config?.furniture?.length || 0),
+          lightsCount: data.lightsCount ?? (data.config?.lights?.length || 0),
+        };
+      }).filter(Boolean);
+    } catch {
+      return [];
+    }
+  }
+
+  restoreBackup(id) {
+    const clean = path.basename(String(id || ''));
+    const targetPath = path.join(BACKUPS_DIR, clean);
+    const snap = readJSON(targetPath, null);
+    if (!snap?.config) throw new Error('Snapshot backup not found');
+    const prev = this.currentPlanObject();
+    if (prev?.rooms?.length) this.createSnapshot(prev, 'Before restore');
+    writeJSON(FILES.plan, snap.config);
+    try { writeJSON(FILES.defaultHomePlan, snap.config); } catch { /* ignore */ }
+    this.select('custom');
+    logEvent(`Restored floor plan snapshot: ${clean}`);
+    return snap.config;
+  }
+
+  saveCustom(config, reason = 'Editor save') {
     if (!config || typeof config !== 'object' || !Array.isArray(config.rooms)) {
       throw new Error('This file is not a House Control floor plan (no "rooms" list).');
     }
+    this.createSnapshot(config, reason);
     writeJSON(FILES.plan, config);
+    try { writeJSON(FILES.defaultHomePlan, config); } catch { /* ignore */ }
     this.select('custom');
   }
 
@@ -633,12 +711,106 @@ class GoveeService {
     this.states.set(dev.id, { ...prev, ...patch, updatedAt: Date.now() });
   }
 
-  async pollAll(linkedIds) {
-    for (const id of linkedIds) {
-      const dev = this.devices.get(id);
-      if (dev) {
-        try { await this.requestStatus(dev); } catch { /* ignore */ }
+  async fetchDynamicScenes(deviceOrId) {
+    const dev = typeof deviceOrId === 'string'
+      ? (this.devices.get(deviceOrId) || [...this.devices.values()].find((d) => d.ip === deviceOrId))
+      : deviceOrId;
+
+    const curated = [
+      { id: 'preset:sunset', name: 'Sunset Glow', color: '#ff7a33', brightness: 0.78, kind: 'preset' },
+      { id: 'preset:aurora', name: 'Aurora', color: '#38e8b0', brightness: 0.72, kind: 'preset' },
+      { id: 'preset:fireplace', name: 'Fireplace', color: '#ff521b', brightness: 0.65, kind: 'preset' },
+      { id: 'preset:candle', name: 'Candlelight', temp: 2200, brightness: 0.45, kind: 'preset' },
+      { id: 'preset:cyberpunk', name: 'Cyberpunk', color: '#b44cff', brightness: 0.85, kind: 'preset' },
+      { id: 'preset:ocean', name: 'Ocean Wave', color: '#2b95ff', brightness: 0.70, kind: 'preset' },
+      { id: 'preset:movie', name: 'Cinema Dim', color: '#4c5fd7', brightness: 0.28, kind: 'preset' },
+      { id: 'preset:festive', name: 'Holiday Red/Gold', color: '#ff3b30', brightness: 0.90, kind: 'preset' },
+    ];
+
+    if (!dev || !this.apiKey || !dev.viaCloud || !dev.sku) {
+      return curated;
+    }
+
+    this.sceneCache ||= new Map();
+    const cacheKey = `${dev.sku}:${dev.id}`;
+    if (this.sceneCache.has(cacheKey)) {
+      return [...this.sceneCache.get(cacheKey), ...curated];
+    }
+
+    try {
+      const res = await fetch(`${GOVEE_OPENAPI_BASE}/device/scenes`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Govee-API-Key': this.apiKey,
+        },
+        body: JSON.stringify({
+          requestId: crypto.randomUUID(),
+          payload: { sku: dev.sku, device: dev.id },
+        }),
+        signal: AbortSignal.timeout(4500),
+      });
+      if (!res.ok) return curated;
+      const body = await res.json();
+      const caps = body?.payload?.capabilities || [];
+      const cloudScenes = [];
+      for (const c of caps) {
+        if (c.instance === 'lightScene' && Array.isArray(c?.parameters?.options)) {
+          for (const opt of c.parameters.options.slice(0, 16)) {
+            if (opt?.name && opt?.value !== undefined) {
+              cloudScenes.push({
+                id: `cloud:${ JSON.stringify(opt.value) }`,
+                name: opt.name,
+                cloudValue: opt.value,
+                kind: 'cloud',
+              });
+            }
+          }
+        }
       }
+      if (cloudScenes.length) this.sceneCache.set(cacheKey, cloudScenes);
+      return [...cloudScenes, ...curated];
+    } catch {
+      return curated;
+    }
+  }
+
+  async applyDynamicScene(deviceId, effect) {
+    const dev = this.devices.get(deviceId) || [...this.devices.values()].find((d) => d.ip === deviceId);
+    if (!dev) throw new Error('Govee device not found');
+    if (effect.kind === 'cloud' && effect.cloudValue !== undefined && dev.viaCloud && this.apiKey) {
+      await this.sendCloudControl(dev, {
+        type: 'devices.capabilities.on_off',
+        instance: 'powerSwitch',
+        value: 1,
+      });
+      await this.sendCloudControl(dev, {
+        type: 'devices.capabilities.dynamic_scene',
+        instance: 'lightScene',
+        value: effect.cloudValue,
+      });
+      logEvent(`${dev.name} [Govee Cloud Scene] "${effect.name}" → ok`);
+      return { on: true, brightness: 0.85, color: effect.color || '#ff9a3c' };
+    }
+    const patch = { on: true };
+    if (effect.brightness) patch.brightness = effect.brightness;
+    if (effect.color) patch.color = effect.color;
+    else if (effect.temp) { patch.temp = effect.temp; patch.color = null; }
+    await this.sendCommand(dev.id, patch, patch);
+    return patch;
+  }
+
+  async pollAll(linkedIds) {
+    const unique = [...new Set(linkedIds)];
+    const batchSize = 4;
+    for (let i = 0; i < unique.length; i += batchSize) {
+      const slice = unique.slice(i, i + batchSize);
+      await Promise.all(slice.map(async (id) => {
+        const dev = this.devices.get(id);
+        if (dev) {
+          try { await this.requestStatus(dev); } catch { /* ignore */ }
+        }
+      }));
     }
   }
 }
@@ -1090,6 +1262,170 @@ function getServicesInfo() {
 }
 
 // ---------------------------------------------------------------------------
+// Smart Schedules & Sunrise / Sunset Automation Engine
+// ---------------------------------------------------------------------------
+function computeSunTimes(now = new Date()) {
+  const start = new Date(now.getFullYear(), 0, 0);
+  const dayOfYear = Math.floor((now - start) / 86400_000);
+  // Seasonal curve for ~37°N latitude: sunrise ~05:45 (summer) to ~07:15 (winter), sunset ~17:00 (winter) to ~20:25 (summer)
+  const season = Math.cos(((dayOfYear - 172) / 365) * 2 * Math.PI);
+  const sunriseMins = Math.round(6 * 60 + 30 - season * 45);
+  const sunsetMins = Math.round(18 * 60 + 40 + season * 100);
+  const fmt = (mins) => `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
+  return { sunrise: fmt(sunriseMins), sunset: fmt(sunsetMins), sunriseMins, sunsetMins };
+}
+
+class ScheduleManager {
+  constructor() {
+    const defaultSchedules = [
+      {
+        id: 'sched-sunset-evening',
+        name: 'Evening Warmth at Sunset',
+        enabled: false,
+        trigger: 'sunset',
+        time: '18:30',
+        offsetMins: 0,
+        days: [0, 1, 2, 3, 4, 5, 6],
+        action: 'scene',
+        targetId: 'evening',
+      },
+      {
+        id: 'sched-night-off',
+        name: 'Late Night All Lights Off',
+        enabled: false,
+        trigger: 'time',
+        time: '23:30',
+        offsetMins: 0,
+        days: [0, 1, 2, 3, 4, 5, 6],
+        action: 'all_off',
+        targetId: '',
+      },
+    ];
+    this.schedules = readJSON(FILES.schedules, defaultSchedules);
+    if (!Array.isArray(this.schedules)) this.schedules = defaultSchedules;
+    this.save();
+  }
+
+  save() {
+    writeJSON(FILES.schedules, this.schedules);
+  }
+
+  listPayload() {
+    return {
+      schedules: this.schedules,
+      sun: computeSunTimes(),
+    };
+  }
+
+  upsert(entry) {
+    const clean = {
+      id: entry.id || `sched-${Date.now()}`,
+      name: String(entry.name || 'Schedule').trim(),
+      enabled: entry.enabled !== false,
+      trigger: ['time', 'sunset', 'sunrise'].includes(entry.trigger) ? entry.trigger : 'time',
+      time: /^\d{2}:\d{2}$/.test(entry.time || '') ? entry.time : '20:00',
+      offsetMins: Number(entry.offsetMins) || 0,
+      days: Array.isArray(entry.days) && entry.days.length ? entry.days.map(Number) : [0, 1, 2, 3, 4, 5, 6],
+      action: ['scene', 'all_off', 'all_on', 'room_on', 'room_off'].includes(entry.action) ? entry.action : 'scene',
+      targetId: String(entry.targetId || ''),
+      lastRunDate: entry.lastRunDate || '',
+    };
+    const idx = this.schedules.findIndex((s) => s.id === clean.id);
+    if (idx >= 0) this.schedules[idx] = clean;
+    else this.schedules.push(clean);
+    this.save();
+    return this.listPayload();
+  }
+
+  toggle(id) {
+    const s = this.schedules.find((x) => x.id === id);
+    if (s) {
+      s.enabled = !s.enabled;
+      this.save();
+    }
+    return this.listPayload();
+  }
+
+  remove(id) {
+    this.schedules = this.schedules.filter((x) => x.id !== id);
+    this.save();
+    return this.listPayload();
+  }
+
+  async executeSchedule(s) {
+    const plan = plans.currentPlanObject();
+    const lights = (plan.lights || []).filter((l) => !l.disabled);
+    const lightsUpdate = {};
+
+    if (s.action === 'all_off' || s.action === 'all_on') {
+      const on = s.action === 'all_on';
+      for (const l of lights) {
+        lightsUpdate[l.id] = { on };
+        await handleBridgeMessage({ type: 'command', kind: 'light', id: l.id, patch: { on }, state: { on } }).catch(() => {});
+      }
+    } else if (s.action === 'room_on' || s.action === 'room_off') {
+      const on = s.action === 'room_on';
+      for (const l of lights.filter((x) => x.room === s.targetId)) {
+        lightsUpdate[l.id] = { on };
+        await handleBridgeMessage({ type: 'command', kind: 'light', id: l.id, patch: { on }, state: { on } }).catch(() => {});
+      }
+    } else if (s.action === 'scene') {
+      const sc = (plan.scenes || []).find((x) => x.id === s.targetId) || (plan.scenes || [])[0];
+      if (sc) {
+        for (const l of lights) {
+          const patch = { ...(sc.lights?.['*'] || {}), ...(sc.lights?.[l.id] || {}) };
+          if (!('color' in patch) && 'temp' in patch) patch.color = null;
+          if (Object.keys(patch).length) {
+            lightsUpdate[l.id] = patch;
+            await handleBridgeMessage({ type: 'command', kind: 'light', id: l.id, patch, state: patch }).catch(() => {});
+          }
+        }
+      }
+    }
+
+    if (Object.keys(lightsUpdate).length) {
+      broadcastSSE('incoming', { fn: 'adopt', args: [{ lights: lightsUpdate, scene: s.action === 'scene' ? s.targetId : null, source: `Schedule: ${s.name}` }] });
+    }
+    logEvent(`Executed schedule "${s.name}" (${s.action}${s.targetId ? ` → ${s.targetId}` : ''})`);
+  }
+
+  async tick() {
+    const now = new Date();
+    const day = now.getDay();
+    const curMins = now.getHours() * 60 + now.getMinutes();
+    const todayKey = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
+    const sun = computeSunTimes(now);
+
+    for (const s of this.schedules) {
+      if (!s.enabled) continue;
+      if (Array.isArray(s.days) && !s.days.includes(day)) continue;
+      if (s.lastRunDate === todayKey) continue;
+
+      let targetMins = 0;
+      if (s.trigger === 'sunrise') {
+        targetMins = sun.sunriseMins + (Number(s.offsetMins) || 0);
+      } else if (s.trigger === 'sunset') {
+        targetMins = sun.sunsetMins + (Number(s.offsetMins) || 0);
+      } else {
+        const [hh, mm] = String(s.time || '20:00').split(':').map(Number);
+        targetMins = (hh || 0) * 60 + (mm || 0);
+      }
+
+      if (curMins === targetMins) {
+        s.lastRunDate = todayKey;
+        this.save();
+        await this.executeSchedule(s);
+      }
+    }
+  }
+}
+
+const scheduler = new ScheduleManager();
+setInterval(() => {
+  scheduler.tick().catch((e) => console.warn('[Scheduler] Tick error:', e.message));
+}, 20000);
+
+// ---------------------------------------------------------------------------
 // Bridge Message Handler
 // ---------------------------------------------------------------------------
 async function handleBridgeMessage(msg) {
@@ -1116,9 +1452,94 @@ async function handleBridgeMessage(msg) {
     }
 
     case 'savePlan': {
-      plans.saveCustom(msg.config);
+      plans.saveCustom(msg.config, msg.reason || 'Editor save');
       broadcastSSE('reload', {});
       return { ok: true, path: FILES.plan };
+    }
+
+    case 'plan.backups': {
+      return { backups: plans.listBackups() };
+    }
+
+    case 'plan.restore': {
+      const restored = plans.restoreBackup(msg.id);
+      broadcastSSE('reload', {});
+      return { ok: true, config: restored, backups: plans.listBackups() };
+    }
+
+    case 'scene.save': {
+      const plan = plans.currentPlanObject();
+      plan.scenes ||= [];
+      const sceneObj = {
+        id: msg.scene.id || `scene-${Date.now()}`,
+        name: String(msg.scene.name || 'Custom Scene').trim(),
+        icon: msg.scene.icon || 'sparkles',
+        custom: true,
+        lights: msg.scene.lights || {},
+        acs: msg.scene.acs || {},
+      };
+      const idx = plan.scenes.findIndex((s) => s.id === sceneObj.id);
+      if (idx >= 0) plan.scenes[idx] = sceneObj;
+      else plan.scenes.push(sceneObj);
+      plans.saveCustom(plan, `Saved scene "${sceneObj.name}"`);
+      return { ok: true, scene: sceneObj, scenes: plan.scenes };
+    }
+
+    case 'scene.delete': {
+      const plan = plans.currentPlanObject();
+      plan.scenes = (plan.scenes || []).filter((s) => s.id !== msg.id);
+      plans.saveCustom(plan, `Deleted scene "${msg.id}"`);
+      return { ok: true, scenes: plan.scenes };
+    }
+
+    case 'schedules.list':
+      return scheduler.listPayload();
+
+    case 'schedules.save':
+      return scheduler.upsert(msg.schedule || {});
+
+    case 'schedules.toggle':
+      return scheduler.toggle(msg.id);
+
+    case 'schedules.delete':
+      return scheduler.remove(msg.id);
+
+    case 'schedules.runNow': {
+      const target = scheduler.schedules.find((s) => s.id === msg.id) || msg.schedule;
+      if (target) await scheduler.executeSchedule(target);
+      return { ok: true };
+    }
+
+    case 'devices.syncNow': {
+      const links = activeLinks();
+      const goveeIds = [...links.values()].filter((l) => l.service === 'govee').map((l) => l.id);
+      if (goveeIds.length) await govee.pollAll(goveeIds);
+      const lightsUpdate = {};
+      for (const [appId, link] of links.entries()) {
+        if (link.service === 'govee' && govee.states.has(link.id)) {
+          lightsUpdate[appId] = govee.states.get(link.id);
+        }
+      }
+      if (Object.keys(lightsUpdate).length) {
+        broadcastSSE('incoming', { fn: 'applyRemote', args: [{ lights: lightsUpdate }] });
+      }
+      return { ok: true, synced: Object.keys(lightsUpdate).length, lights: lightsUpdate };
+    }
+
+    case 'govee.scenes': {
+      const links = activeLinks();
+      const link = links.get(msg.id);
+      const devId = link?.service === 'govee' ? link.id : msg.id;
+      const scenes = await govee.fetchDynamicScenes(devId);
+      return { scenes };
+    }
+
+    case 'govee.applyScene': {
+      const links = activeLinks();
+      const link = links.get(msg.id);
+      const devId = link?.service === 'govee' ? link.id : msg.id;
+      const patch = await govee.applyDynamicScene(devId, msg.effect || {});
+      return { ok: true, patch };
     }
 
     case 'exportPlan':
@@ -1302,6 +1723,7 @@ const MIME_TYPES = {
   '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
+  '.webmanifest': 'application/manifest+json; charset=utf-8',
   '.png': 'image/png',
   '.svg': 'image/svg+xml',
   '.ico': 'image/x-icon',

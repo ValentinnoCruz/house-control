@@ -1,7 +1,7 @@
 // Home editor (separate window): a top-down plan you can drag things around on,
 // an inspector for the selected item, a live 3D preview and the links to real devices.
 import './editor.css';
-import { normalize, loadRawConfig, LIGHT_KINDS, FLOOR_KINDS, isLinked } from '../config.js';
+import { normalize, loadRawConfig, LIGHT_KINDS, FLOOR_KINDS, isLinked, isWithinSeasonalWindow } from '../config.js';
 import { createWorld } from '../three/world.js';
 import { FURNITURE_TYPES, footprint } from '../three/furniture.js';
 import { h, clamp } from '../ui/dom.js';
@@ -66,6 +66,29 @@ const round = (v, step = 0.05) => Math.round(v / step) * step;
 const fix = (v) => Math.round(v * 1000) / 1000;
 const slug = (t) => String(t).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'item';
 
+const FURNITURE_SWATCHES = [
+  ['#6a584e', 'Warm Taupe'],
+  ['#a89882', 'Oatmeal Linen'],
+  ['#2e3540', 'Charcoal Slate'],
+  ['#8a5a36', 'Warm Oak'],
+  ['#4a3220', 'Dark Walnut'],
+  ['#d8d2c7', 'Cream Boucle'],
+  ['#3b5249', 'Forest Sage'],
+  ['#2c4866', 'Navy Velvet'],
+  ['#8c3f32', 'Terracotta'],
+];
+
+function fmtFeetInches(m) {
+  const totalIn = Math.round(Math.abs(m) * 39.3700787);
+  const ft = Math.floor(totalIn / 12);
+  const inch = totalIn % 12;
+  return `${ft}'${inch}"`;
+}
+
+function fmtDual(m) {
+  return `${fix(m)}m (${fmtFeetInches(m)})`;
+}
+
 // Anchor the top-left corner (-w/2, -d/2 in local space) in world coordinates so
 // changing width or length (depth) only moves one side instead of expanding from center.
 function topLeftAnchor(item) {
@@ -122,11 +145,17 @@ export async function bootEditor(root) {
   let previewLights = true;
   let previewSize = 'normal'; // 'normal' | 'large' | 'full'
   let edit3D = false;
+  let cutaway3D = 'auto';
   let groupMove = true;
   let clipboard = null;
   let zoom2D = 1;
   let pan2D = [0, 0];
   let spaceDown = false;
+  const multiSel = new Set(); // indices of multi-selected furniture items
+  let marquee = null; // { x1, z1, x2, z2 }
+  let activeGuides = []; // [{ x1, z1, x2, z2 }]
+  let activeRulers = []; // [{ x1, z1, x2, z2, label }]
+  const backupsState = { list: null, busy: false, error: null };
 
   const collapsedGroups = new Set();
   const collapsedFurnGroups = new Set();
@@ -221,9 +250,18 @@ export async function bootEditor(root) {
     },
   });
 
+  const cutaway3DBtn = h('button.chip', {
+    title: 'Cycle 3D wall cutaway mode (Auto camera-facing · Low all · Full walls)',
+    onclick: () => {
+      cutaway3D = cutaway3D === 'auto' ? 'low' : cutaway3D === 'low' ? 'full' : 'auto';
+      world?.setCutawayMode?.(cutaway3D);
+      updatePreviewControls();
+    },
+  });
+
   const previewWrap = h('div.preview-wrap',
     previewHost,
-    h('div.preview-toolbar', previewToggle, edit3DBtn, size3DBtn, full3DBtn),
+    h('div.preview-toolbar', previewToggle, cutaway3DBtn, edit3DBtn, size3DBtn, full3DBtn),
     previewEditBar);
 
   const editorRoot = h('div.editor',
@@ -235,11 +273,12 @@ export async function bootEditor(root) {
         h('button.btn', { title: 'Open the live 3D Control Panel', onclick: () => { location.href = location.pathname; } }, icon('home', 14), '3D Control Panel'),
         h('button.btn', { title: 'Undo (Ctrl+Z)', onclick: () => stepHistory(undo, redo) }, icon('undo', 14), 'Undo'),
         h('button.btn', { title: 'Redo (Ctrl+Y)', onclick: () => stepHistory(redo, undo) }, icon('redo', 14), 'Redo'),
+        h('button.btn', { title: 'View & restore saved floor plan snapshots', onclick: () => { backupsState.list = null; select({ kind: 'backups' }); } }, icon('history', 14), 'Backups…'),
         h('button.btn', { onclick: importPlan }, 'Import…'),
         h('button.btn', { onclick: exportPlan }, 'Export…'),
         saveBtn)),
     sidebar,
-    h('main.canvas', zoomBar, plan, h('div.hint', 'Scroll to zoom · drag empty space to pan · drag blue handle to resize from one side · Ctrl+C / Ctrl+V copy & paste · Ctrl+Z / Ctrl+Y undo & redo')),
+    h('main.canvas', zoomBar, plan, h('div.hint', 'Scroll to zoom · drag empty space to pan · Shift+Drag to box-select · drag blue handle to resize from one side · Ctrl+C / Ctrl+V copy & paste')),
     h('aside.right', previewWrap, inspector),
     h('footer.foot', status),
     toastEl);
@@ -251,6 +290,10 @@ export async function bootEditor(root) {
     editorRoot.classList.toggle('preview-full', previewSize === 'full');
     edit3DBtn.classList.toggle('active', edit3D);
     edit3DBtn.replaceChildren(icon('move', 13), edit3D ? '3D Edit: ON' : '3D Edit: OFF');
+    cutaway3DBtn.replaceChildren(
+      icon('layers', 13),
+      cutaway3D === 'auto' ? 'Walls: Auto' : cutaway3D === 'low' ? 'Walls: Low' : 'Walls: Full'
+    );
     size3DBtn.replaceChildren(
       icon(previewSize === 'normal' ? 'maximize' : 'minimize', 13),
       previewSize === 'normal' ? 'Size: Split' : previewSize === 'large' ? 'Size: Large' : 'Size: Full'
@@ -377,6 +420,13 @@ export async function bootEditor(root) {
   }
 
   function copySelectedFurniture(wholeGroup = false) {
+    if (multiSel.size > 1) {
+      const items = [...multiSel].map((i) => doc.furniture[i]).filter(Boolean).map((f) => structuredClone(f));
+      if (!items.length) return false;
+      clipboard = { kind: 'furniture-multi', group: `${items.length} items`, items, pasteCount: 0 };
+      toast(`Copied ${items.length} selected furniture items — press Ctrl+V to paste`);
+      return true;
+    }
     if (sel.kind !== 'furniture' || !doc.furniture[sel.index]) return false;
     const item = doc.furniture[sel.index];
     if (wholeGroup && item.group) {
@@ -396,6 +446,7 @@ export async function bootEditor(root) {
     clipboard.pasteCount = (clipboard.pasteCount || 0) + 1;
     const offset = 0.35 * clipboard.pasteCount;
     let lastIdx = doc.furniture.length;
+    multiSel.clear();
     for (const src of clipboard.items) {
       const copy = structuredClone(src);
       delete copy.locked;
@@ -404,11 +455,12 @@ export async function bootEditor(root) {
       }
       doc.furniture.push(copy);
       lastIdx = doc.furniture.length - 1;
+      if (clipboard.items.length > 1) multiSel.add(lastIdx);
     }
-    sel = { kind: 'furniture', index: lastIdx };
+    sel = clipboard.items.length > 1 ? { kind: 'multi-furniture' } : { kind: 'furniture', index: lastIdx };
     touch();
     toast(clipboard.items.length > 1
-      ? `Pasted ${clipboard.items.length} items in group "${clipboard.group}"`
+      ? `Pasted ${clipboard.items.length} items`
       : `Pasted "${clipboard.items[0].name || FURNITURE_LABELS[clipboard.items[0].type] || clipboard.items[0].type}"`);
     return true;
   }
@@ -423,7 +475,11 @@ export async function bootEditor(root) {
     schedulePreview();
   }
 
-  function select(next) {
+  function select(next, { keepMulti = false } = {}) {
+    if (!keepMulti && next.kind !== 'multi-furniture') {
+      multiSel.clear();
+      if (next.kind === 'furniture' && next.index != null) multiSel.add(next.index);
+    }
     sel = next;
     lastSnapshotKey = null;
     renderSidebar();
@@ -552,6 +608,7 @@ export async function bootEditor(root) {
         },
       });
       world.setInsets(6, 6);
+      world.setCutawayMode?.(cutaway3D);
       if (prevCam) world.setCameraState(prevCam);
       world.setRunning(true);
       const w = world;
@@ -837,15 +894,17 @@ export async function bootEditor(root) {
       const [w, d] = footprint(f);
       const isRound = f.type === 'roundDiningSet' && Math.abs(w - d) < 0.02;
       const inSameGroup = Boolean(selectedGroup && f.group === selectedGroup && !isSel('furniture', i));
+      const isMulti = multiSel.has(i) && (!isSel('furniture', i) || multiSel.size > 1);
       const labelText = f.name || (f.group ? f.group : '');
+      const tintStyle = f.color ? `fill:${f.color};fill-opacity:0.46` : null;
       kids.push(sv('g', {
-        class: `p-furn${isSel('furniture', i) ? ' sel' : ''}${inSameGroup ? ' group-peer' : ''}${f.locked ? ' locked' : ''}`,
+        class: `p-furn${isSel('furniture', i) ? ' sel' : ''}${isMulti ? ' multi-sel' : ''}${inSameGroup ? ' group-peer' : ''}${f.locked ? ' locked' : ''}`,
         'data-kind': 'furniture', 'data-index': i,
         transform: `translate(${f.pos[0]} ${f.pos[1]}) rotate(${-(f.rot || 0)})`,
       },
         isRound
-          ? sv('circle', { cx: 0, cy: 0, r: w / 2 })
-          : sv('rect', { x: -w / 2, y: -d / 2, width: w, height: d, rx: 0.06 }),
+          ? sv('circle', { cx: 0, cy: 0, r: w / 2, style: tintStyle })
+          : sv('rect', { x: -w / 2, y: -d / 2, width: w, height: d, rx: 0.06, style: tintStyle }),
         isRound
           ? sv('circle', { cx: 0, cy: 0, r: (f.width || 1.25) / 2, fill: 'none', stroke: 'currentColor', 'stroke-width': 0.025, opacity: 0.65 })
           : null,
@@ -895,6 +954,28 @@ export async function bootEditor(root) {
       }
       kids.push(g);
     });
+
+    // Smart alignment guides & distance rulers
+    for (const g of activeGuides) {
+      kids.push(sv('line', { x1: g.x1, y1: g.z1, x2: g.x2, y2: g.z2, class: 'p-guide' }));
+    }
+    for (const r of activeRulers) {
+      const mx = (r.x1 + r.x2) / 2;
+      const mz = (r.z1 + r.z2) / 2;
+      const tagW = Math.max(1.2, r.label.length * 0.105);
+      kids.push(
+        sv('line', { x1: r.x1, y1: r.z1, x2: r.x2, y2: r.z2, class: 'p-ruler-line' }),
+        sv('rect', { x: mx - tagW / 2, y: mz - 0.16, width: tagW, height: 0.3, rx: 0.06, class: 'p-ruler-bg' }),
+        sv('text', { x: mx, y: mz + 0.05, class: 'p-ruler-label' }, document.createTextNode(r.label))
+      );
+    }
+    if (marquee) {
+      const mx = Math.min(marquee.x1, marquee.x2);
+      const mz = Math.min(marquee.z1, marquee.z2);
+      const mw = Math.abs(marquee.x2 - marquee.x1);
+      const md = Math.abs(marquee.z2 - marquee.z1);
+      kids.push(sv('rect', { x: mx, y: mz, width: mw, height: md, class: 'p-marquee' }));
+    }
 
     if (sel.kind === 'room' && doc.rooms[sel.index] && !doc.rooms[sel.index].locked) {
       const [x, z, w, d] = doc.rooms[sel.index].rect;
@@ -964,11 +1045,101 @@ export async function bootEditor(root) {
     ac.pos = wall === 'north' ? [cx, rz] : wall === 'south' ? [cx, fix(rz + rd)] : wall === 'west' ? [rx, cz] : [fix(rx + rw), cz];
   }
 
+  function computeSmartGuidesAndRulers(item, idx, allowSnap = true) {
+    activeGuides = [];
+    activeRulers = [];
+    if (!item || !Array.isArray(item.pos)) return [0, 0];
+    const [w, d] = footprint(item);
+    const rad = ((item.rot || 0) % 180 === 90 || (item.rot || 0) % 180 === -90);
+    const halfW = (rad ? d : w) / 2;
+    const halfD = (rad ? w : d) / 2;
+    const cx = item.pos[0];
+    const cz = item.pos[1];
+    let snapDx = 0;
+    let snapDz = 0;
+    const SNAP_THRESH = 0.045;
+
+    if (allowSnap) {
+      let bestX = SNAP_THRESH;
+      let bestZ = SNAP_THRESH;
+      let guideX = null;
+      let guideZ = null;
+      for (let i = 0; i < doc.furniture.length; i++) {
+        if (i === idx || multiSel.has(i)) continue;
+        const other = doc.furniture[i];
+        if (!Array.isArray(other.pos)) continue;
+        const [ow, od] = footprint(other);
+        const orad = ((other.rot || 0) % 180 === 90 || (other.rot || 0) % 180 === -90);
+        const oHalfW = (orad ? od : ow) / 2;
+        const oHalfD = (orad ? ow : od) / 2;
+        const xCandidates = [
+          [cx, other.pos[0]],
+          [cx - halfW, other.pos[0] - oHalfW],
+          [cx + halfW, other.pos[0] + oHalfW],
+        ];
+        for (const [mine, theirs] of xCandidates) {
+          const diff = theirs - mine;
+          if (Math.abs(diff) < bestX) {
+            bestX = Math.abs(diff);
+            snapDx = diff;
+            guideX = { x1: theirs, z1: Math.min(cz, other.pos[1]) - 0.8, x2: theirs, z2: Math.max(cz, other.pos[1]) + 0.8 };
+          }
+        }
+        const zCandidates = [
+          [cz, other.pos[1]],
+          [cz - halfD, other.pos[1] - oHalfD],
+          [cz + halfD, other.pos[1] + oHalfD],
+        ];
+        for (const [mine, theirs] of zCandidates) {
+          const diff = theirs - mine;
+          if (Math.abs(diff) < bestZ) {
+            bestZ = Math.abs(diff);
+            snapDz = diff;
+            guideZ = { x1: Math.min(cx, other.pos[0]) - 0.8, z1: theirs, x2: Math.max(cx, other.pos[0]) + 0.8, z2: theirs };
+          }
+        }
+      }
+      if (guideX) activeGuides.push(guideX);
+      if (guideZ) activeGuides.push(guideZ);
+    }
+
+    const fx = fix(cx + snapDx);
+    const fz = fix(cz + snapDz);
+    const rm = roomAt([fx, fz]);
+    if (rm) {
+      const [rx, rz, rw, rd] = rm.rect;
+      const distWest = fix((fx - halfW) - rx);
+      const distEast = fix((rx + rw) - (fx + halfW));
+      const distNorth = fix((fz - halfD) - rz);
+      const distSouth = fix((rz + rd) - (fz + halfD));
+      if (distWest >= 0.05 && distWest <= distEast) {
+        activeRulers.push({ x1: rx, z1: fz, x2: fx - halfW, z2: fz, label: fmtDual(distWest) });
+      } else if (distEast >= 0.05) {
+        activeRulers.push({ x1: fx + halfW, z1: fz, x2: rx + rw, z2: fz, label: fmtDual(distEast) });
+      }
+      if (distNorth >= 0.05 && distNorth <= distSouth) {
+        activeRulers.push({ x1: fx, z1: rz, x2: fx, z2: fz - halfD, label: fmtDual(distNorth) });
+      } else if (distSouth >= 0.05) {
+        activeRulers.push({ x1: fx, z1: fz + halfD, x2: fx, z2: rz + rd, label: fmtDual(distSouth) });
+      }
+    }
+    return [snapDx, snapDz];
+  }
+
   let drag = null;
   plan.addEventListener('pointerdown', (ev) => {
     const el = ev.target.closest('[data-kind]');
     const kind = el?.dataset.kind;
     plan.setPointerCapture(ev.pointerId);
+
+    // Shift + Drag on empty space starts marquee box multi-selection
+    if (ev.shiftKey && (!kind || kind === 'none') && ev.button === 0 && !spaceDown) {
+      const [sx, sz] = planPoint(ev);
+      marquee = { x1: sx, z1: sz, x2: sx, z2: sz };
+      drag = { kind: 'marquee', start: [sx, sz], moved: false };
+      renderPlan();
+      return;
+    }
 
     // Panning 2D view when dragging empty background, middle-clicking, or holding Space.
     if (ev.button === 1 || spaceDown || !kind || kind === 'none') {
@@ -1000,7 +1171,19 @@ export async function bootEditor(root) {
       drag = { kind, index, start, from: [...o.from], to: [...o.to], moved: false };
       return;
     }
-    if (!isSel(kind, index)) select({ kind, index });
+    if (kind === 'furniture' && ev.shiftKey) {
+      if (multiSel.has(index)) multiSel.delete(index);
+      else multiSel.add(index);
+      if (multiSel.size > 1) select({ kind: 'multi-furniture' }, { keepMulti: true });
+      else if (multiSel.size === 1) select({ kind: 'furniture', index: [...multiSel][0] });
+      else select({ kind: 'home' });
+      return;
+    }
+    if (kind === 'furniture' && multiSel.size > 1 && multiSel.has(index)) {
+      // Keep multi-selection intact so user can drag all selected items together
+    } else if (!isSel(kind, index)) {
+      select({ kind, index });
+    }
     const item = doc[KEYS[kind]][index];
     if (item?.locked) {
       toast(`"${item.name || item.type || item.id}" is locked in place`, false);
@@ -1027,16 +1210,44 @@ export async function bootEditor(root) {
         drag.riders = doc.lights
           .filter((l) => l !== item && l.room === item.room && l.type === 'fanBulb' && !l.locked)
           .map((o) => ({ o, pos: [...o.pos] }));
-      } else if (kind === 'furniture' && item.group && groupMove && !ev.altKey) {
-        drag.riders = doc.furniture
-          .filter((f) => f !== item && f.group === item.group && !f.locked && Array.isArray(f.pos))
-          .map((o) => ({ o, pos: [...o.pos] }));
+      } else if (kind === 'furniture') {
+        const riderSet = new Set();
+        if (multiSel.size > 1 && multiSel.has(index)) {
+          for (const mi of multiSel) {
+            const mf = doc.furniture[mi];
+            if (mf && mf !== item && !mf.locked && Array.isArray(mf.pos)) riderSet.add(mf);
+          }
+        }
+        if (item.group && groupMove && !ev.altKey) {
+          for (const gf of doc.furniture) {
+            if (gf !== item && gf.group === item.group && !gf.locked && Array.isArray(gf.pos)) riderSet.add(gf);
+          }
+        }
+        drag.riders = [...riderSet].map((o) => ({ o, pos: [...o.pos] }));
       }
     }
   });
 
   plan.addEventListener('pointermove', (ev) => {
     if (!drag) return;
+    if (drag.kind === 'marquee') {
+      const [px, pz] = planPoint(ev);
+      marquee = { x1: drag.start[0], z1: drag.start[1], x2: px, z2: pz };
+      drag.moved = true;
+      const minX = Math.min(marquee.x1, marquee.x2);
+      const maxX = Math.max(marquee.x1, marquee.x2);
+      const minZ = Math.min(marquee.z1, marquee.z2);
+      const maxZ = Math.max(marquee.z1, marquee.z2);
+      multiSel.clear();
+      doc.furniture.forEach((f, idx) => {
+        if (!Array.isArray(f.pos)) return;
+        if (f.pos[0] >= minX && f.pos[0] <= maxX && f.pos[1] >= minZ && f.pos[1] <= maxZ) {
+          multiSel.add(idx);
+        }
+      });
+      renderPlan();
+      return;
+    }
     if (drag.kind === 'pan') {
       const dxPx = ev.clientX - drag.clientStart[0];
       const dyPx = ev.clientY - drag.clientStart[1];
@@ -1073,6 +1284,14 @@ export async function bootEditor(root) {
       const newW = fix(clamp(round(localW, 0.05), 0.25, 10));
       const newD = fix(clamp(round(localD, 0.05), 0.25, 10));
       resizeFurnitureOneSide(item, newW, newD, drag.anchor);
+      computeSmartGuidesAndRulers(item, drag.index, false);
+      activeRulers.push({
+        x1: drag.anchor[0],
+        z1: drag.anchor[1],
+        x2: item.pos[0],
+        z2: item.pos[1],
+        label: `${fmtDual(newW)} × ${fmtDual(newD)}`,
+      });
     } else if (drag.kind === 'resize-open-from' || drag.kind === 'resize-open-to') {
       const alongX = Math.abs(drag.from[1] - drag.to[1]) < 1e-4;
       const endKey = drag.kind === 'resize-open-from' ? 'from' : 'to';
@@ -1101,13 +1320,21 @@ export async function bootEditor(root) {
       snapAC(item, [px, pz]);
     } else {
       item.pos = [fix(drag.pos[0] + dx), fix(drag.pos[1] + dz)];
+      let snapDx = 0;
+      let snapDz = 0;
+      if (drag.kind === 'furniture') {
+        [snapDx, snapDz] = computeSmartGuidesAndRulers(item, drag.index, !ev.altKey);
+        if (snapDx || snapDz) {
+          item.pos = [fix(item.pos[0] + snapDx), fix(item.pos[1] + snapDz)];
+        }
+      }
       if (drag.kind === 'light') {
         const room = roomAt(item.pos);
         if (room) item.room = room.id;
       }
       if (drag.riders) {
         for (const r of drag.riders) {
-          r.o.pos = [fix(r.pos[0] + dx), fix(r.pos[1] + dz)];
+          r.o.pos = [fix(r.pos[0] + dx + snapDx), fix(r.pos[1] + dz + snapDz)];
           if (drag.kind === 'light') {
             const room = roomAt(item.pos);
             if (room) r.o.room = room.id;
@@ -1119,7 +1346,24 @@ export async function bootEditor(root) {
   });
 
   const endDrag = () => {
-    if (drag?.kind === 'pan' && !drag.moved) select({ kind: 'home' });
+    if (drag?.kind === 'marquee') {
+      marquee = null;
+      if (multiSel.size > 1) {
+        select({ kind: 'multi-furniture' }, { keepMulti: true });
+        toast(`Selected ${multiSel.size} furniture items`);
+      } else if (multiSel.size === 1) {
+        select({ kind: 'furniture', index: [...multiSel][0] });
+      } else {
+        renderPlan();
+      }
+    } else if (drag?.kind === 'pan' && !drag.moved) {
+      select({ kind: 'home' });
+    }
+    if (activeGuides.length || activeRulers.length) {
+      activeGuides = [];
+      activeRulers = [];
+      renderPlan();
+    }
     drag = null;
     lastSnapshotKey = null;
   };
@@ -1191,7 +1435,123 @@ export async function bootEditor(root) {
           bind('Elevation, °', number(1), { ...prop(doc.camera, 'elevation', 47), parse: parseNum })),
         h('p.note', 'Walls facing the camera are cut away, so the azimuth decides which side of the home is open.')),
       section('Keyboard shortcuts',
-        h('p.note', '• Ctrl+C / Ctrl+V: Copy & paste selected furniture (Shift+Ctrl+C copies whole group)\n• Ctrl+Z / Ctrl+Y: Undo & Redo\n• Mouse Wheel: Zoom 2D plan in & out\n• Drag empty canvas / Space+Drag: Pan 2D plan')));
+        h('p.note', '• Shift+Drag on empty canvas: Box multi-select furniture\n• Ctrl+C / Ctrl+V: Copy & paste selected furniture (Shift+Ctrl+C copies whole group)\n• Ctrl+Z / Ctrl+Y: Undo & Redo\n• Mouse Wheel: Zoom 2D plan in & out\n• Drag empty canvas / Space+Drag: Pan 2D plan')));
+    } else if (kind === 'backups') {
+      nodes.push(h('button.back-link', { onclick: () => select({ kind: 'home' }) }, icon('back', 14, 2.2), 'Back to 2D Floor Plan'));
+      head('Plan Backups', 'Automatic snapshots created every time you save');
+      if (!backupsState.list && !backupsState.busy) {
+        backupsState.busy = true;
+        call('plan.backups').then((r) => {
+          backupsState.list = r?.backups || [];
+          backupsState.busy = false;
+          if (sel.kind === 'backups') renderInspector();
+        }).catch((e) => {
+          backupsState.error = e.message;
+          backupsState.busy = false;
+          if (sel.kind === 'backups') renderInspector();
+        });
+      }
+      if (backupsState.busy) {
+        nodes.push(h('p.note', 'Loading saved snapshots…'));
+      } else if (backupsState.error) {
+        nodes.push(h('p.note.bad', backupsState.error));
+      } else if (!backupsState.list?.length) {
+        nodes.push(section('Snapshots', h('p.note', 'No snapshot backups yet. Every time you click “Save & apply”, the previous plan is automatically archived here.')));
+      } else {
+        nodes.push(section(`Saved Snapshots (${backupsState.list.length})`,
+          h('div.backup-list', backupsState.list.map((b) => h('div.backup-row',
+            h('div.backup-meta',
+              h('b', new Date(b.mtime).toLocaleString()),
+              h('span', `${b.filename} · ${(b.size / 1024).toFixed(1)} KB`)),
+            h('button.btn', {
+              onclick: async () => {
+                try {
+                  const res = await call('plan.restore', { filename: b.filename });
+                  if (res?.config) {
+                    snapshot('restore-backup');
+                    doc = res.config;
+                    for (const key of Object.values(KEYS)) doc[key] ||= [];
+                    nameInput.value = doc.name || 'Home';
+                    dirty = false;
+                    backupsState.list = null;
+                    touch();
+                    toast(`Restored snapshot from ${new Date(b.mtime).toLocaleTimeString()}`);
+                  }
+                } catch (err) {
+                  toast(err.message || 'Restore failed', true);
+                }
+              },
+            }, 'Restore'))))));
+      }
+    } else if (kind === 'multi-furniture') {
+      const indices = [...multiSel].filter((i) => doc.furniture[i]);
+      const items = indices.map((i) => doc.furniture[i]);
+      head(`${items.length} Furniture Items`, 'Multi-selection batch actions');
+      const existingGroups = [...new Set(doc.furniture.map((f) => (f.group || '').trim()).filter(Boolean))];
+      const commonGroup = items.every((f) => (f.group || '') === (items[0]?.group || '')) ? (items[0]?.group || '') : '';
+      const groupInput = h('input', { type: 'text', value: commonGroup, placeholder: 'Assign group name to all selected…' });
+      const applyGroupBtn = h('button.btn.primary', {
+        onclick: () => {
+          snapshot('multi-group');
+          const val = groupInput.value.trim();
+          for (const f of items) {
+            if (val) f.group = val;
+            else delete f.group;
+          }
+          touch();
+          toast(val ? `Assigned ${items.length} items to group "${val}"` : `Cleared group on ${items.length} items`);
+        },
+      }, 'Apply Group');
+      const allLocked = items.every((f) => f.locked);
+      nodes.push(
+        section('Batch Grouping',
+          h('label.field', h('span', 'Group name for all selected'), groupInput),
+          existingGroups.length ? h('div.seasonal-presets', existingGroups.map((g) => h('button.seasonal-chip', {
+            onclick: () => { groupInput.value = g; applyGroupBtn.click(); },
+          }, g))) : null,
+          applyGroupBtn),
+        section('Batch Material & Color Tinting',
+          h('div.furn-swatches',
+            ...FURNITURE_SWATCHES.map(([hex, label]) => h('button.furn-swatch', {
+              style: `background:${hex}`,
+              title: `Tint all ${items.length} items: ${label} (${hex})`,
+              onclick: () => {
+                snapshot('multi-color');
+                for (const f of items) f.color = hex;
+                touch();
+              },
+            })),
+            h('button.btn', {
+              onclick: () => {
+                snapshot('multi-color-clear');
+                for (const f of items) delete f.color;
+                touch();
+              },
+            }, 'Reset default colors'))),
+        section('Batch Actions',
+          h('div.fields',
+            h('button.btn', {
+              onclick: () => {
+                snapshot('multi-lock');
+                for (const f of items) f.locked = !allLocked;
+                touch();
+              },
+            }, icon(allLocked ? 'unlock' : 'lock', 13), allLocked ? 'Unlock All' : 'Lock All'),
+            h('button.btn', {
+              onclick: () => { copySelectedFurniture(false); pasteClipboard(); },
+            }, icon('copy', 13), 'Duplicate All'),
+            h('button.btn', {
+              onclick: () => {
+                snapshot('multi-delete');
+                const sorted = [...indices].sort((a, b) => b - a);
+                for (const idx of sorted) doc.furniture.splice(idx, 1);
+                multiSel.clear();
+                select({ kind: 'home' });
+                touch();
+                toast(`Deleted ${sorted.length} furniture items`);
+              },
+            }, icon('trash', 13), 'Delete All')))
+      );
     } else if (kind === 'connections') {
       nodes.push(h('button.back-link', { onclick: () => select({ kind: 'home' }) }, icon('back', 14, 2.2), 'Back to 2D Floor Plan'));
       head('Connections', 'Where your real lamps and air conditioners live');
@@ -1213,7 +1573,7 @@ export async function bootEditor(root) {
         section('Position & size, m',
           row(bind('X', number(0.1), { ...at(item, 'rect', 0), parse: parseNum }), bind('Z', number(0.1), { ...at(item, 'rect', 1), parse: parseNum })),
           row(bind('Width', number(0.1), { ...at(item, 'rect', 2), parse: parseNum }), bind('Depth', number(0.1), { ...at(item, 'rect', 3), parse: parseNum })),
-          h('p.note', 'Rooms that share an edge get an interior wall there. Add a door or an “open” gap to connect them.')));
+          h('p.note', `Dimensions: ${fmtDual(item.rect[2])} × ${fmtDual(item.rect[3])}. Rooms that share an edge get an interior wall there.`)));
     } else if (kind === 'light') {
       head(item.name || item.id, `id: ${item.id}`);
       item.capabilities ||= [];
@@ -1221,6 +1581,19 @@ export async function bootEditor(root) {
         get: () => item.capabilities.includes(name),
         set: (on) => { item.capabilities = item.capabilities.filter((c) => c !== name); if (on) item.capabilities.push(name); },
       });
+      const inSeason = isWithinSeasonalWindow(item.seasonalFrom, item.seasonalTo);
+      const setSeasonPreset = (from, to) => {
+        snapshot('light-season');
+        if (!from || !to) {
+          delete item.seasonalFrom;
+          delete item.seasonalTo;
+        } else {
+          item.seasonalFrom = from;
+          item.seasonalTo = to;
+          delete item.disabled;
+        }
+        touch();
+      };
       nodes.push(
         lockBanner(item, 'Light'),
         section('Seasonal / Map Visibility',
@@ -1237,8 +1610,31 @@ export async function bootEditor(root) {
               h('b', item.disabled ? 'Disabled (Hidden from 3D Map & Controls)' : 'Enabled (Shown on 3D Map & Controls)'),
               h('span', item.disabled
                 ? 'Click to re-enable. Device link & position are saved for when you bring this light back out.'
-                : 'Click to disable seasonally (e.g. Xmas tree) without losing your Govee link or position.'))
-          )),
+                : 'Click to disable manually, or set an automatic seasonal active window below.'))
+          ),
+          h('div.seasonal-presets',
+            h(`button.seasonal-chip${!item.seasonalFrom && !item.seasonalTo ? '.active' : ''}`, {
+              onclick: () => setSeasonPreset('', ''),
+            }, 'Always Year-Round'),
+            h(`button.seasonal-chip${item.seasonalFrom === '11-25' && item.seasonalTo === '01-06' ? '.active' : ''}`, {
+              onclick: () => setSeasonPreset('11-25', '01-06'),
+            }, 'Christmas (Nov 25 – Jan 6)'),
+            h(`button.seasonal-chip${item.seasonalFrom === '10-01' && item.seasonalTo === '11-02' ? '.active' : ''}`, {
+              onclick: () => setSeasonPreset('10-01', '11-02'),
+            }, 'Halloween (Oct 1 – Nov 2)'),
+            h(`button.seasonal-chip${item.seasonalFrom === '05-01' && item.seasonalTo === '09-30' ? '.active' : ''}`, {
+              onclick: () => setSeasonPreset('05-01', '09-30'),
+            }, 'Summer (May 1 – Sep 30)')
+          ),
+          row(
+            bind('Active from (MM-DD)', h('input', { type: 'text', placeholder: 'e.g. 11-25' }), optional(item, 'seasonalFrom')),
+            bind('Active until (MM-DD)', h('input', { type: 'text', placeholder: 'e.g. 01-06' }), optional(item, 'seasonalTo'))
+          ),
+          (item.seasonalFrom && item.seasonalTo)
+            ? h('p.note', inSeason
+              ? `Currently IN SEASON (${item.seasonalFrom} → ${item.seasonalTo}): shown on the live 3D map.`
+              : `Currently OFF-SEASON (${item.seasonalFrom} → ${item.seasonalTo}): automatically hidden on the live 3D map until ${item.seasonalFrom}.`)
+            : null),
         section('Light',
           bind('Name', text(), prop(item, 'name', '')),
           row(bind('Room', choice(doc.rooms.map((r) => [r.id, r.name || r.id])), { ...prop(item, 'room'), event: 'change' }),
@@ -1313,7 +1709,17 @@ export async function bootEditor(root) {
       const moveGroupCheck = h('input', { type: 'checkbox', checked: groupMove });
       moveGroupCheck.addEventListener('change', () => { groupMove = moveGroupCheck.checked; });
 
-      head(item.name || FURNITURE_LABELS[item.type] || item.type, item.group ? `Group: ${item.group}` : 'Furniture item');
+      const colorPicker = h('input', {
+        type: 'color',
+        value: /^#[0-9a-fA-F]{6}$/.test(item.color || '') ? item.color : '#6a584e',
+        oninput: (e) => {
+          snapshot(`furn-color-${sel.index}`);
+          item.color = e.target.value;
+          touch({ inspector: false });
+        },
+      });
+
+      head(item.name || FURNITURE_LABELS[item.type] || item.type, item.group ? `Group: ${item.group}` : `${fmtDual(curW)} × ${fmtDual(curD)}`);
       nodes.push(
         lockBanner(item, 'Furniture'),
         section('Furniture Identity & Grouping',
@@ -1329,9 +1735,9 @@ export async function bootEditor(root) {
             item.group ? h('button.btn', {
               onclick: () => { copySelectedFurniture(true); pasteClipboard(); },
             }, icon('copy', 13), `Duplicate "${item.group}"`) : null)),
-        section('One-Sided Size (Width & Length), m',
+        section('One-Sided Size (Width & Length)',
           row(
-            bind('Width, m', number(0.05), {
+            bind(`Width (${fmtFeetInches(curW)})`, number(0.05), {
               get: () => fix(curW),
               set: (nextW) => {
                 const [, d] = footprint(item);
@@ -1339,7 +1745,7 @@ export async function bootEditor(root) {
               },
               parse: parseNum,
             }),
-            bind('Length (depth), m', number(0.05), {
+            bind(`Length (${fmtFeetInches(curD)})`, number(0.05), {
               get: () => fix(curD),
               set: (nextD) => {
                 const [w] = footprint(item);
@@ -1352,11 +1758,32 @@ export async function bootEditor(root) {
             ? bind('Height, m', number(0.05), { ...optional(item, 'height'), parse: optNum })
             : null,
           h('p.note', 'Changing Width or Length anchors the top-left corner (marked with a small dot on the 2D plan) and resizes from one side only.')),
-        section('Position & Appearance',
+        section('Position, Material & Color Tinting',
           row(bind('X', number(), { ...at(item, 'pos', 0), parse: parseNum }), bind('Z', number(), { ...at(item, 'pos', 1), parse: parseNum })),
-          row(bind('Rotation, °', number(15), { ...prop(item, 'rot', 0), parse: parseNum }),
-            bind('Colour (hex, optional)', text(), optional(item, 'color'))),
-          h('p.note', 'The short line on the plan marks the front. Rotation 0° faces south (towards the bottom of the plan).')));
+          row(
+            bind('Rotation, °', number(15), { ...prop(item, 'rot', 0), parse: parseNum }),
+            h('label.field', h('span', 'Custom color / finish'),
+              h('div.color-picker-row',
+                colorPicker,
+                bind('', text(), optional(item, 'color')).lastChild,
+                item.color ? h('button.btn', {
+                  title: 'Reset to default material finish',
+                  onclick: () => { snapshot(); delete item.color; touch(); },
+                }, 'Reset') : null
+              ))
+          ),
+          h('div.furn-swatches',
+            ...FURNITURE_SWATCHES.map(([hex, label]) => h(`button.furn-swatch${item.color === hex ? '.active' : ''}`, {
+              style: `background:${hex}`,
+              title: `${label} (${hex})`,
+              onclick: () => {
+                snapshot();
+                item.color = hex;
+                touch();
+              },
+            }))
+          ),
+          h('p.note', 'Pick any material swatch or custom color to tint the 3D furniture model and 2D floor plan footprint.')));
     } else if (kind === 'opening') {
       head(item.type || 'door', 'A gap or a window in a wall');
       nodes.push(
@@ -1626,29 +2053,55 @@ export async function bootEditor(root) {
       return;
     }
 
-    if ((ev.key === 'Backspace' || ev.key === 'Delete') && !typing && sel.index != null) {
-      ev.preventDefault();
-      remove(sel.kind, sel.index);
-    } else if (ev.key?.startsWith('Arrow') && !typing && sel.index != null) {
-      const item = doc[KEYS[sel.kind]][sel.index];
-      if (!item || item.locked) return;
-      const target = item.pos || item.rect;
-      if (!target) return;
-      ev.preventDefault();
+    if ((ev.key === 'Backspace' || ev.key === 'Delete') && !typing) {
+      if (sel.kind === 'multi-furniture' && multiSel.size > 0) {
+        ev.preventDefault();
+        snapshot('multi-delete-key');
+        const sorted = [...multiSel].sort((a, b) => b - a);
+        for (const idx of sorted) doc.furniture.splice(idx, 1);
+        multiSel.clear();
+        select({ kind: 'home' });
+        touch();
+        return;
+      }
+      if (sel.index != null) {
+        ev.preventDefault();
+        remove(sel.kind, sel.index);
+      }
+    } else if (ev.key?.startsWith('Arrow') && !typing) {
       const stepSize = ev.shiftKey ? 0.5 : 0.05;
-      snapshot(`nudge${sel.kind}${sel.index}`);
       const dx = ev.key === 'ArrowLeft' ? -stepSize : ev.key === 'ArrowRight' ? stepSize : 0;
       const dz = ev.key === 'ArrowUp' ? -stepSize : ev.key === 'ArrowDown' ? stepSize : 0;
-      target[0] = fix(target[0] + dx);
-      target[1] = fix(target[1] + dz);
-      if (sel.kind === 'furniture' && item.group && groupMove) {
-        for (const other of doc.furniture) {
-          if (other !== item && other.group === item.group && !other.locked && Array.isArray(other.pos)) {
-            other.pos = [fix(other.pos[0] + dx), fix(other.pos[1] + dz)];
+      if (sel.kind === 'multi-furniture' && multiSel.size > 0) {
+        ev.preventDefault();
+        snapshot('nudge-multi');
+        for (const idx of multiSel) {
+          const f = doc.furniture[idx];
+          if (f && !f.locked && Array.isArray(f.pos)) {
+            f.pos = [fix(f.pos[0] + dx), fix(f.pos[1] + dz)];
           }
         }
+        touch();
+        return;
       }
-      touch();
+      if (sel.index != null) {
+        const item = doc[KEYS[sel.kind]]?.[sel.index];
+        if (!item || item.locked) return;
+        const target = item.pos || item.rect;
+        if (!target) return;
+        ev.preventDefault();
+        snapshot(`nudge${sel.kind}${sel.index}`);
+        target[0] = fix(target[0] + dx);
+        target[1] = fix(target[1] + dz);
+        if (sel.kind === 'furniture' && item.group && groupMove) {
+          for (const other of doc.furniture) {
+            if (other !== item && other.group === item.group && !other.locked && Array.isArray(other.pos)) {
+              other.pos = [fix(other.pos[0] + dx), fix(other.pos[1] + dz)];
+            }
+          }
+        }
+        touch();
+      }
     }
   });
 
