@@ -106,7 +106,6 @@ const builders = {
 
   sofa({ width = 2.2, color = '#8b93a7' }) {
     const g = seating(width, 0.95, color, width > 2 ? 3 : 2);
-    // throw pillow
     const pillow = at(box(0.36, 0.36, 0.12, mat('#d9b98a', { rough: 1 }), { r: 0.05 }), -width / 2 + 0.42, 0.46, -0.1);
     pillow.rotation.set(-0.25, 0.3, 0.1);
     g.add(pillow);
@@ -122,7 +121,6 @@ const builders = {
   },
 
   loveseatLeft({ width = 1.5, color = '#8b93a7' }) {
-    // Left end of a sectional: has Left armrest, missing Right armrest so it connects flush on its right
     const g = seating(width, 0.95, color, 2, { leftArm: true, rightArm: false });
     const pillow = at(box(0.34, 0.34, 0.12, mat('#d9b98a', { rough: 1 }), { r: 0.05 }), -width / 2 + 0.4, 0.46, -0.1);
     pillow.rotation.set(-0.25, 0.3, 0.1);
@@ -131,7 +129,6 @@ const builders = {
   },
 
   loveseatRight({ width = 1.5, color = '#8b93a7' }) {
-    // Right end of a sectional: missing Left armrest, has Right armrest so it connects flush on its left
     const g = seating(width, 0.95, color, 2, { leftArm: false, rightArm: true });
     const pillow = at(box(0.34, 0.34, 0.12, mat('#d9b98a', { rough: 1 }), { r: 0.05 }), width / 2 - 0.4, 0.46, -0.1);
     pillow.rotation.set(-0.25, -0.3, -0.1);
@@ -144,12 +141,10 @@ const builders = {
   },
 
   chaiseLeft({ width = 0.95, color = '#8b93a7' }) {
-    // Left chaise: has Left armrest, missing Right armrest to connect flush to loveseatRight
     return chaiseSection(width, 1.65, color, { leftArm: true, rightArm: false });
   },
 
   chaiseRight({ width = 0.95, color = '#8b93a7' }) {
-    // Right chaise: missing Left armrest, has Right armrest to connect flush to loveseatLeft
     return chaiseSection(width, 1.65, color, { leftArm: false, rightArm: true });
   },
 
@@ -157,8 +152,8 @@ const builders = {
     return seating(0.92, 0.88, color, 1);
   },
 
-  coffeeTable({ width = 1.1 }) {
-    const wood = mat(WOOD, { rough: 0.6 });
+  coffeeTable({ width = 1.1, color = WOOD }) {
+    const wood = mat(color || WOOD, { rough: 0.6 });
     return group(
       at(box(width, 0.04, 0.58, wood, { r: 0.015 }), 0, 0.36, 0),
       at(box(width - 0.16, 0.02, 0.44, mat(BLACK, { rough: 0.5 }), { r: 0.008 }), 0, 0.14, 0),
@@ -168,14 +163,14 @@ const builders = {
     );
   },
 
-  tv({ width = 1.7 }) {
+  tv({ width = 1.7, color = DARK_WOOD }) {
     const sw = width * 0.84;
     const sh = sw * 0.5625;
     const screen = new THREE.MeshStandardMaterial({
       color: '#05070c', roughness: 0.25, emissive: '#27407a', emissiveIntensity: 0.35,
     });
     return group(
-      at(box(width, 0.36, 0.4, mat(DARK_WOOD, { rough: 0.6 }), { r: 0.015 }), 0, 0.1, 0),
+      at(box(width, 0.36, 0.4, mat(color || DARK_WOOD, { rough: 0.6 }), { r: 0.015 }), 0, 0.1, 0),
       ...legs(width, 0.4, 0.1, mat(BLACK), 0.08, 0.015),
       ...doorLines(width, 0.3, 0.13, 0.2, 3, mat(BLACK)),
       at(box(sw + 0.03, sh + 0.03, 0.035, mat(BLACK, { rough: 0.4 }), { r: 0.008 }), 0, 0.72, -0.15),
@@ -184,19 +179,20 @@ const builders = {
     );
   },
 
-  sideboard({ width = 1.6 }) {
+  sideboard({ width = 1.6, color = WOOD }) {
+    const bodyColor = color || WOOD;
     return group(
       ...legs(width, 0.42, 0.16, mat(BLACK), 0.07, 0.015),
-      at(box(width, 0.6, 0.42, mat(WOOD, { rough: 0.6 }), { r: 0.015 }), 0, 0.16, 0),
-      ...doorLines(width, 0.54, 0.19, 0.21, 4, mat(DARK_WOOD)),
+      at(box(width, 0.6, 0.42, mat(bodyColor, { rough: 0.6 }), { r: 0.015 }), 0, 0.16, 0),
+      ...doorLines(width, 0.54, 0.19, 0.21, 4, mat(darker(bodyColor, 0.7))),
       at(cyl(0.07, 0.05, 0.26, mat('#3d6b8c', { rough: 0.35 })), -width / 2 + 0.3, 0.76, 0),
       at(box(0.3, 0.05, 0.2, mat('#d8c9a8', { rough: 0.9 }), { r: 0.006 }), width / 2 - 0.35, 0.76, 0),
     );
   },
 
-  diningSet({ width = 1.8, chairs = 6 }) {
+  diningSet({ width = 1.8, chairs = 6, color = '#b48d63' }) {
     const depth = 0.95;
-    const wood = mat('#b48d63', { rough: 0.55 });
+    const wood = mat(color || '#b48d63', { rough: 0.55 });
     const g = group(
       at(box(width, 0.05, depth, wood, { r: 0.02 }), 0, 0.71, 0),
       ...legs(width, depth, 0.71, mat(BLACK, { rough: 0.5 }), 0.1, 0.028),
@@ -215,9 +211,9 @@ const builders = {
     return g;
   },
 
-  island({ width = 2.0, stools = 3 }) {
+  island({ width = 2.0, stools = 3, color = '#39424f' }) {
     const g = group(
-      at(box(width - 0.12, 0.88, 0.62, mat('#39424f', { rough: 0.7 }), { r: 0.015 }), 0, 0, -0.04),
+      at(box(width - 0.12, 0.88, 0.62, mat(color || '#39424f', { rough: 0.7 }), { r: 0.015 }), 0, 0, -0.04),
       at(box(width, 0.05, 0.86, mat('#e9e7e2', { rough: 0.3 }), { r: 0.015 }), 0, 0.88, 0),
     );
     for (let i = 0; i < stools; i++) {
@@ -231,9 +227,9 @@ const builders = {
     return g;
   },
 
-  kitchen({ width = 3, upper = true }) {
-    const front = mat('#e4e1da', { rough: 0.6 });
-    const seam = mat('#b9b6ae');
+  kitchen({ width = 3, upper = true, color = '#e4e1da' }) {
+    const front = mat(color || '#e4e1da', { rough: 0.6 });
+    const seam = mat(darker(color || '#e4e1da', 0.8));
     const n = Math.max(2, Math.round(width / 0.6));
     const g = group(
       at(box(width, 0.86, 0.6, front, { r: 0.008 }), 0, 0, 0),
@@ -253,8 +249,8 @@ const builders = {
     return g;
   },
 
-  fridge() {
-    const body = mat('#c5c9d0', { rough: 0.35, metal: 0.5 });
+  fridge({ color = '#c5c9d0' } = {}) {
+    const body = mat(color || '#c5c9d0', { rough: 0.35, metal: 0.5 });
     return group(
       at(box(0.7, 1.92, 0.68, body, { r: 0.025 }), 0, 0, 0),
       at(box(0.66, 0.008, 0.005, mat('#7c8088'), { r: 0 }), 0, 1.25, 0.34),
@@ -281,29 +277,29 @@ const builders = {
     return g;
   },
 
-  nightstand() {
+  nightstand({ color = WOOD } = {}) {
     return group(
-      at(box(0.46, 0.44, 0.4, mat(WOOD, { rough: 0.6 }), { r: 0.015 }), 0, 0.06, 0),
+      at(box(0.46, 0.44, 0.4, mat(color || WOOD, { rough: 0.6 }), { r: 0.015 }), 0, 0.06, 0),
       ...legs(0.46, 0.4, 0.06, mat(BLACK), 0.06, 0.014),
       at(box(0.4, 0.006, 0.005, mat(DARK_WOOD), { r: 0 }), 0, 0.28, 0.2),
     );
   },
 
-  dresser({ width = 1.3 }) {
+  dresser({ width = 1.3, color = WHITE }) {
     const g = group(
       ...legs(width, 0.45, 0.1, mat(BLACK), 0.06, 0.015),
-      at(box(width, 0.74, 0.45, mat(WHITE, { rough: 0.6 }), { r: 0.015 }), 0, 0.1, 0),
+      at(box(width, 0.74, 0.45, mat(color || WHITE, { rough: 0.6 }), { r: 0.015 }), 0, 0.1, 0),
       at(cyl(0.09, 0.07, 0.18, mat('#c9a15e', { rough: 0.4 })), width / 2 - 0.3, 0.84, 0),
     );
     for (let i = 1; i < 3; i++) g.add(at(box(width - 0.06, 0.006, 0.005, mat('#b9b6ae'), { r: 0 }), 0, 0.1 + 0.247 * i, 0.226));
     return g;
   },
 
-  plant({ height = 1.2 }) {
+  plant({ height = 1.2, color = '#d7d0c4' }) {
     const rand = rng(Math.round(height * 1000));
     const leaves = [mat('#3f7d52', { rough: 0.9 }), mat('#4f9462', { rough: 0.9 }), mat('#35694a', { rough: 0.9 })];
     const g = group(
-      at(cyl(0.17, 0.12, 0.3, mat('#d7d0c4', { rough: 0.8 })), 0, 0, 0),
+      at(cyl(0.17, 0.12, 0.3, mat(color || '#d7d0c4', { rough: 0.8 })), 0, 0, 0),
       at(cyl(0.15, 0.15, 0.02, mat('#3a2c22', { rough: 1 })), 0, 0.285, 0),
       at(cyl(0.015, 0.02, height * 0.55, mat('#6b4a33', { rough: 1 }), 8), 0, 0.3, 0),
     );
@@ -321,11 +317,12 @@ const builders = {
     return g;
   },
 
-  vanity({ width = 1.0 }) {
+  vanity({ width = 1.0, color = WOOD }) {
     const mirror = new THREE.MeshStandardMaterial({ color: '#b9c7dc', roughness: 0.12, metalness: 0.9 });
+    const bodyColor = color || WOOD;
     return group(
-      at(box(width, 0.62, 0.48, mat(WOOD, { rough: 0.6 }), { r: 0.012 }), 0, 0.2, 0),
-      ...doorLines(width, 0.56, 0.23, 0.24, 2, mat(DARK_WOOD)),
+      at(box(width, 0.62, 0.48, mat(bodyColor, { rough: 0.6 }), { r: 0.012 }), 0, 0.2, 0),
+      ...doorLines(width, 0.56, 0.23, 0.24, 2, mat(darker(bodyColor, 0.72))),
       at(box(width + 0.03, 0.04, 0.5, mat(WHITE, { rough: 0.25 }), { r: 0.012 }), 0, 0.82, 0),
       at(cyl(0.19, 0.15, 0.1, mat(WHITE, { rough: 0.2 })), 0, 0.86, 0.02),
       at(cyl(0.012, 0.012, 0.2, mat(METAL, { rough: 0.2, metal: 0.9 }), 10), 0, 0.86, -0.18),
@@ -333,16 +330,16 @@ const builders = {
     );
   },
 
-  bathtub() {
+  bathtub({ color = WHITE } = {}) {
     return group(
-      at(box(1.7, 0.56, 0.78, mat(WHITE, { rough: 0.25 }), { r: 0.1 }), 0, 0, 0),
+      at(box(1.7, 0.56, 0.78, mat(color || WHITE, { rough: 0.25 }), { r: 0.1 }), 0, 0, 0),
       at(box(1.5, 0.02, 0.58, mat('#9fd3ec', { rough: 0.1, emissive: '#1d4f6b', emissiveIntensity: 0.25 }), { r: 0.009 }), 0, 0.545, 0),
       at(cyl(0.014, 0.014, 0.2, mat(METAL, { rough: 0.2, metal: 0.9 }), 10), -0.74, 0.56, 0),
     );
   },
 
-  tubShower({ width = 1.7, depth = 0.8 }) {
-    const tubMat = mat(WHITE, { rough: 0.22 });
+  tubShower({ width = 1.7, depth = 0.8, color = WHITE }) {
+    const tubMat = mat(color || WHITE, { rough: 0.22 });
     const waterMat = mat('#9fd3ec', { rough: 0.1, emissive: '#1d4f6b', emissiveIntensity: 0.25 });
     const chrome = mat(METAL, { rough: 0.18, metal: 0.92 });
     const darkMetal = mat(BLACK, { rough: 0.3, metal: 0.8 });
@@ -355,28 +352,23 @@ const builders = {
     const arm = at(cyl(0.012, 0.012, 0.34, chrome, 10), headX + 0.17, 1.98, 0);
     arm.rotation.z = Math.PI / 2;
     return group(
-      // Bathtub apron & basin
       at(box(width, 0.54, depth, tubMat, { r: 0.06 }), 0, 0, 0),
       at(box(Math.max(0.2, width - 0.18), 0.02, Math.max(0.2, depth - 0.18), waterMat, { r: 0.009 }), 0, 0.525, 0),
-      // Drain & tub spout
       at(cyl(0.028, 0.028, 0.01, chrome, 14), headX + 0.14, 0.535, 0),
       at(box(0.09, 0.025, 0.035, chrome, { r: 0.006 }), headX + 0.04, 0.62, 0),
-      // Mixer valve + handle
       at(cyl(0.035, 0.035, 0.03, darkMetal, 14), headX + 0.02, 1.05, 0),
-      // Standing shower riser column + rainfall showerhead
       at(cyl(0.013, 0.013, 1.44, chrome, 12), headX, 0.54, 0),
       arm,
       at(cyl(0.13, 0.13, 0.018, chrome, 24), headX + 0.32, 1.95, 0),
       at(cyl(0.12, 0.12, 0.006, darkMetal, 24), headX + 0.32, 1.945, 0),
-      // Frameless tempered glass standing shower shield + frame rail
       at(box(screenW, screenH, 0.016, glass, { r: 0.004 }), -width / 2 + screenW / 2 + 0.03, 0.54, depth / 2 - 0.03),
       at(box(0.024, screenH, 0.028, darkMetal, { r: 0.004 }), -width / 2 + 0.03, 0.54, depth / 2 - 0.03),
       at(box(screenW, 0.02, 0.024, darkMetal, { r: 0.004 }), -width / 2 + screenW / 2 + 0.03, 0.54, depth / 2 - 0.03),
     );
   },
 
-  toilet() {
-    const c = mat(WHITE, { rough: 0.25 });
+  toilet({ color = WHITE } = {}) {
+    const c = mat(color || WHITE, { rough: 0.25 });
     const bowl = at(cyl(0.19, 0.13, 0.4, c), 0, 0, 0.1);
     bowl.scale.z = 1.25;
     const lid = at(cyl(0.2, 0.2, 0.03, c), 0, 0.4, 0.1);
@@ -384,12 +376,12 @@ const builders = {
     return group(at(box(0.38, 0.78, 0.17, c, { r: 0.03 }), 0, 0, -0.24), bowl, lid);
   },
 
-  desk({ width = 1.4 }) {
+  desk({ width = 1.4, color = WOOD }) {
     const c = chair('#2b2e37');
     c.position.z = 0.5;
     c.rotation.y = Math.PI;
     return group(
-      at(box(width, 0.04, 0.65, mat(WOOD, { rough: 0.55 }), { r: 0.012 }), 0, 0.72, 0),
+      at(box(width, 0.04, 0.65, mat(color || WOOD, { rough: 0.55 }), { r: 0.012 }), 0, 0.72, 0),
       ...legs(width, 0.65, 0.72, mat(BLACK), 0.06, 0.02),
       at(box(0.56, 0.34, 0.025, mat(BLACK, { rough: 0.3 }), { r: 0.008 }), 0, 0.86, -0.18),
       at(box(0.2, 0.1, 0.12, mat(BLACK), { r: 0.008 }), 0, 0.76, -0.18),
@@ -397,16 +389,17 @@ const builders = {
     );
   },
 
-  wardrobe({ width = 1.6, height = 2.1 }) {
+  wardrobe({ width = 1.6, height = 2.1, color = WHITE }) {
+    const bodyColor = color || WHITE;
     return group(
-      at(box(width, height, 0.6, mat(WHITE, { rough: 0.6 }), { r: 0.015 }), 0, 0, 0),
-      ...doorLines(width, height - 0.08, 0.04, 0.3, Math.max(2, Math.round(width / 0.55)), mat('#b9b6ae')),
+      at(box(width, height, 0.6, mat(bodyColor, { rough: 0.6 }), { r: 0.015 }), 0, 0, 0),
+      ...doorLines(width, height - 0.08, 0.04, 0.3, Math.max(2, Math.round(width / 0.55)), mat(darker(bodyColor, 0.78))),
     );
   },
 
-  bookshelf({ width = 1.0, height = 1.8 }) {
+  bookshelf({ width = 1.0, height = 1.8, color = WOOD }) {
     const rand = rng(Math.round(width * 100 + height * 7));
-    const wood = mat(WOOD, { rough: 0.6 });
+    const wood = mat(color || WOOD, { rough: 0.6 });
     const g = group(at(box(width, height, 0.04, wood, { r: 0 }), 0, 0, -0.14));
     for (const sx of [-1, 1]) g.add(at(box(0.03, height, 0.32, wood, { r: 0 }), sx * (width / 2 - 0.015), 0, 0));
     const shelves = Math.round(height / 0.38);
@@ -427,8 +420,8 @@ const builders = {
     return g;
   },
 
-  chimney({ width = 1.4, depth = 0.55, height = 1.25 }) {
-    const stone = mat('#6e6a66', { rough: 0.92 });
+  chimney({ width = 1.4, depth = 0.55, height = 1.25, color = '#6e6a66' }) {
+    const stone = mat(color || '#6e6a66', { rough: 0.92 });
     const mantel = mat(DARK_WOOD, { rough: 0.65 });
     const hearth = mat('#15161a', { rough: 0.85 });
     const ember = new THREE.MeshStandardMaterial({
@@ -442,8 +435,8 @@ const builders = {
     );
   },
 
-  washer({ width = 0.65 }) {
-    const body = mat(WHITE, { rough: 0.35 });
+  washer({ width = 0.65, color = WHITE }) {
+    const body = mat(color || WHITE, { rough: 0.35 });
     const drum = mat('#222630', { rough: 0.2, metal: 0.6 });
     return group(
       at(box(width, 0.85, 0.65, body, { r: 0.02 }), 0, 0, 0),
@@ -453,30 +446,25 @@ const builders = {
   },
 
   roundDiningSet({ width = 1.25, chairs = 4, color = '#383330' }) {
-    // Counter-height circular dark wood table with 2 center storage shelves + 4 high chairs with grey cushions
     const radius = width / 2;
-    const darkWood = mat(color, { rough: 0.58 });
-    const topWood = mat(darker(color, 1.15), { rough: 0.5 });
+    const darkWood = mat(color || '#383330', { rough: 0.58 });
+    const topWood = mat(darker(color || '#383330', 1.15), { rough: 0.5 });
     const cushionMat = mat('#b8babf', { rough: 0.9 });
     const legSpan = radius * 0.46;
 
     const g = group(
-      // Round tabletop + apron ring
       at(cyl(radius, radius, 0.045, topWood, 36), 0, 0.84, 0),
       at(cyl(radius - 0.035, radius - 0.035, 0.055, darkWood, 32), 0, 0.785, 0),
-      // 2 square storage shelves stacked in the center between the 4 legs
       at(box(legSpan * 2 + 0.04, 0.032, legSpan * 2 + 0.04, darkWood, { r: 0.008 }), 0, 0.48, 0),
       at(box(legSpan * 2 + 0.04, 0.032, legSpan * 2 + 0.04, darkWood, { r: 0.008 }), 0, 0.18, 0),
     );
 
-    // 4 straight square post legs
     for (const sx of [-1, 1]) {
       for (const sz of [-1, 1]) {
         g.add(at(box(0.055, 0.84, 0.055, darkWood, { r: 0.006 }), sx * legSpan, 0, sz * legSpan));
       }
     }
 
-    // Counter-height chairs with grey seat cushion, grey upper back pad, and interlocking ring motif
     const count = Math.max(2, Math.min(8, chairs || 4));
     for (let i = 0; i < count; i++) {
       const a = (i * Math.PI * 2) / count + Math.PI / 4;
@@ -486,7 +474,6 @@ const builders = {
       const seatH = 0.56;
       const backH = 0.46;
 
-      // 4 chair legs + footrest stretchers
       for (const sx of [-1, 1]) {
         for (const sz of [-1, 1]) {
           ch.add(at(box(0.032, seatH, 0.032, darkWood, { r: 0.004 }), sx * (seatW / 2 - 0.025), 0, sz * (seatD / 2 - 0.025)));
@@ -496,13 +483,11 @@ const builders = {
       ch.add(at(box(seatW - 0.05, 0.024, 0.022, darkWood, { r: 0.003 }), 0, 0.18, seatD / 2 - 0.025));
       ch.add(at(box(seatW - 0.05, 0.024, 0.022, darkWood, { r: 0.003 }), 0, 0.18, -seatD / 2 + 0.025));
 
-      // Seat frame + grey upholstered seat cushion
       ch.add(
         at(box(seatW, 0.04, seatD, darkWood, { r: 0.008 }), 0, seatH - 0.02, 0),
         at(box(seatW - 0.02, 0.055, seatD - 0.02, cushionMat, { r: 0.02 }), 0, seatH + 0.02, 0),
       );
 
-      // Backrest posts + top rail + grey upholstered back pad + ring lattice motif
       const bz = -seatD / 2 + 0.02;
       for (const sx of [-1, 1]) {
         ch.add(at(box(0.034, backH, 0.032, darkWood, { r: 0.004 }), sx * (seatW / 2 - 0.025), seatH, bz));
@@ -528,13 +513,12 @@ const builders = {
   },
 
   coffeeBar({ width = 1.2, color = '#2c3e66' }) {
-    // Navy blue & wood coffee bar / buffet hutch (47.2in W x 15.5in D x 47.4in H = 1.20m x 0.40m x 1.20m)
     const depth = 0.40;
     const baseH = 0.84;
     const hutchH = 0.35;
     const hutchD = 0.20;
-    const navy = mat(color, { rough: 0.62 });
-    const darkNavy = mat(darker(color, 0.78), { rough: 0.68 });
+    const navy = mat(color || '#2c3e66', { rough: 0.62 });
+    const darkNavy = mat(darker(color || '#2c3e66', 0.78), { rough: 0.68 });
     const woodTop = mat('#a67b51', { rough: 0.52 });
     const glass = new THREE.MeshStandardMaterial({
       color: '#b8cde0', roughness: 0.18, metalness: 0.2, transparent: true, opacity: 0.55,
@@ -545,37 +529,28 @@ const builders = {
     const leftX = -width / 2 + leftW / 2;
 
     const g = group(
-      // Base plinth + main navy cabinet body
       at(box(width + 0.02, 0.075, depth + 0.02, darkNavy, { r: 0.008 }), 0, 0, 0),
       at(box(width, baseH - 0.075, depth, navy, { r: 0.01 }), 0, 0.075, 0),
-      // Top wide drawer on left (30.7in) + 2 black knobs
       at(box(leftW - 0.03, 0.14, 0.02, darkNavy, { r: 0.006 }), leftX, baseH - 0.16, depth / 2 + 0.005),
       at(cyl(0.012, 0.012, 0.02, knob, 12), leftX - 0.18, baseH - 0.09, depth / 2 + 0.02),
       at(cyl(0.012, 0.012, 0.02, knob, 12), leftX + 0.18, baseH - 0.09, depth / 2 + 0.02),
-      // 2 fluted-glass lower doors on left
       at(box(leftW / 2 - 0.025, 0.55, 0.018, darkNavy, { r: 0.006 }), leftX - leftW / 4, 0.1, depth / 2 + 0.004),
       at(box(leftW / 2 - 0.025, 0.55, 0.018, darkNavy, { r: 0.006 }), leftX + leftW / 4, 0.1, depth / 2 + 0.004),
       at(box(leftW / 2 - 0.09, 0.46, 0.022, glass, { r: 0.004 }), leftX - leftW / 4, 0.145, depth / 2 + 0.005),
       at(box(leftW / 2 - 0.09, 0.46, 0.022, glass, { r: 0.004 }), leftX + leftW / 4, 0.145, depth / 2 + 0.005),
-      // Right side cabinet panel seams
       at(box(width * 0.31, 0.70, 0.016, darkNavy, { r: 0.006 }), width / 2 - width * 0.165, 0.1, depth / 2 + 0.004),
-      // Warm butcher-block wood countertop
       at(box(width + 0.03, 0.035, depth + 0.025, woodTop, { r: 0.008 }), 0, baseH, 0.005),
-      // Upper hutch back panel + side wings + warm wood top shelf
       at(box(width - 0.02, hutchH, 0.025, navy, { r: 0.006 }), 0, baseH + 0.035, -depth / 2 + 0.015),
       at(box(0.025, hutchH, hutchD, navy, { r: 0.006 }), -width / 2 + 0.02, baseH + 0.035, -depth / 2 + hutchD / 2),
       at(box(0.025, hutchH, hutchD, navy, { r: 0.006 }), width / 2 - 0.02, baseH + 0.035, -depth / 2 + hutchD / 2),
       at(box(width + 0.02, 0.03, hutchD + 0.02, woodTop, { r: 0.008 }), 0, baseH + 0.035 + hutchH, -depth / 2 + hutchD / 2),
-      // Black hanging rail under top hutch shelf
       at(box(width - 0.08, 0.012, 0.012, knob, { r: 0.004 }), 0, baseH + hutchH - 0.01, -depth / 2 + hutchD - 0.03),
     );
 
-    // Cable pass-through circle in hutch back
     const hole = at(cyl(0.038, 0.038, 0.03, mat(WHITE, { rough: 0.9 }), 20), -0.08, baseH + 0.21, -depth / 2 + 0.015);
     hole.rotation.x = Math.PI / 2;
     g.add(hole);
 
-    // 6 hanging hooks / mugs on the hutch rail
     for (let i = 0; i < 6; i++) {
       const hx = -width / 2 + 0.18 + i * ((width - 0.36) / 5);
       g.add(at(box(0.008, 0.045, 0.015, mat(METAL, { metal: 0.8, rough: 0.3 }), { r: 0.002 }), hx, baseH + hutchH - 0.055, -depth / 2 + hutchD - 0.03));
@@ -584,17 +559,13 @@ const builders = {
   },
 
   pantry({ width = 0.7, color = '#e4e1da' }) {
-    // Tall kitchen pantry cabinet with the exact same footprint & height as fridge (0.70m W x 0.68m D x 1.92m H)
-    const body = mat(color, { rough: 0.55 });
-    const seam = mat(darker(color, 0.78), { rough: 0.7 });
+    const body = mat(color || '#e4e1da', { rough: 0.55 });
+    const seam = mat(darker(color || '#e4e1da', 0.78), { rough: 0.7 });
     const handle = mat('#6e737b', { metal: 0.75, rough: 0.3 });
     return group(
       at(box(width, 1.92, 0.68, body, { r: 0.02 }), 0, 0, 0),
-      // Horizontal door split between upper & lower pantry doors
       at(box(width - 0.04, 0.008, 0.006, seam, { r: 0 }), 0, 1.12, 0.341),
-      // Vertical center split between left & right pantry doors
       at(box(0.008, 1.82, 0.006, seam, { r: 0 }), 0, 0.05, 0.341),
-      // Upper and lower door handles
       at(box(0.016, 0.28, 0.025, handle, { r: 0.006 }), -0.045, 1.22, 0.35),
       at(box(0.016, 0.28, 0.025, handle, { r: 0.006 }), 0.045, 1.22, 0.35),
       at(box(0.016, 0.28, 0.025, handle, { r: 0.006 }), -0.045, 0.76, 0.35),

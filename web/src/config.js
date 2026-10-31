@@ -31,6 +31,21 @@ export const SERVICES = {
 };
 export const FLOOR_KINDS = ['oak', 'walnut', 'tile', 'stone', 'rug'];
 
+/**
+ * Checks whether a light with an optional MM-DD seasonal window is active on `now`.
+ * Supports ranges that wrap across New Year (e.g. "11-25" to "01-06").
+ */
+export function isWithinSeasonalWindow(seasonalFrom, seasonalTo, now = new Date()) {
+  const from = String(seasonalFrom || '').trim();
+  const to = String(seasonalTo || '').trim();
+  if (!/^\d{2}-\d{2}$/.test(from) || !/^\d{2}-\d{2}$/.test(to)) return true;
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  const cur = `${mm}-${dd}`;
+  if (from <= to) return cur >= from && cur <= to;
+  return cur >= from || cur <= to;
+}
+
 // The plan exactly as written on disk (the editor works on this form).
 export async function loadRawConfig() {
   const boot = window.__HOUSE_BOOT__;
@@ -92,16 +107,19 @@ export function normalize(raw) {
     need(roomIds.has(l.room), `Light "${l.id}" refers to unknown room "${l.room}"`);
     need(LIGHT_TYPES.includes(l.type), `Light "${l.id}" has unknown type "${l.type}" (use ${LIGHT_TYPES.join(', ')})`);
     need(isPoint(l.pos), `Light "${l.id}" needs "pos": [x, z]`);
+    const seasonalActive = isWithinSeasonalWindow(l.seasonalFrom, l.seasonalTo);
+    const seasonalAutoDisabled = Boolean(l.seasonalFrom && l.seasonalTo && !seasonalActive);
     return {
       ...l,
       name: l.name || l.id,
       rot: l.rot || 0,
       disabled: Boolean(l.disabled),
+      seasonalAutoDisabled,
       locked: Boolean(l.locked),
       capabilities: l.capabilities || [], // plain smart plugs: on/off only
     };
   });
-  const lights = allLights.filter((l) => !l.disabled);
+  const lights = allLights.filter((l) => !l.disabled && !l.seasonalAutoDisabled);
 
   const acs = (raw.acs || []).map((a) => {
     unique(a.id, 'An AC');
@@ -113,7 +131,7 @@ export function normalize(raw) {
 
   const scenes = (raw.scenes || []).map((s) => {
     need(typeof s.id === 'string' && s.id, 'A scene is missing an "id"');
-    return { id: s.id, name: s.name || s.id, icon: s.icon || 'sun', lights: s.lights || {}, acs: s.acs || {} };
+    return { id: s.id, name: s.name || s.id, icon: s.icon || 'sun', custom: Boolean(s.custom), lights: s.lights || {}, acs: s.acs || {} };
   });
 
   const minX = Math.min(...rooms.map((r) => r.x));
