@@ -38,6 +38,7 @@ const FILES = {
   hue: path.join(DATA_DIR, 'hue.json'),
   tuya: path.join(DATA_DIR, 'tuya.json'),
   schedules: path.join(DATA_DIR, 'schedules.json'),
+  modes: path.join(DATA_DIR, 'modes.json'),
   log: path.join(DATA_DIR, 'events.log'),
 };
 
@@ -130,11 +131,17 @@ class PlanStore {
         .sort()
         .reverse();
       return files.map((f) => {
-        const data = readJSON(path.join(BACKUPS_DIR, f), null);
+        const fullPath = path.join(BACKUPS_DIR, f);
+        const data = readJSON(fullPath, null);
         if (!data) return null;
+        let stat = null;
+        try { stat = fs.statSync(fullPath); } catch { /* ignore */ }
         return {
           id: data.id || f,
+          filename: data.id || f,
           timestamp: data.timestamp,
+          mtime: data.timestamp ? new Date(data.timestamp).getTime() : (stat?.mtimeMs || Date.now()),
+          size: stat?.size || 2048,
           reason: data.reason || 'Snapshot',
           name: data.name || 'Home',
           roomsCount: data.roomsCount ?? (data.config?.rooms?.length || 0),
@@ -1275,6 +1282,51 @@ function computeSunTimes(now = new Date()) {
   return { sunrise: fmt(sunriseMins), sunset: fmt(sunsetMins), sunriseMins, sunsetMins };
 }
 
+function computeCircadianKelvin(now = new Date()) {
+  const h = now.getHours() + now.getMinutes() / 60;
+  if (h < 6) return 2200;
+  if (h < 9) return Math.round(2200 + ((h - 6) / 3) * (4600 - 2200));
+  if (h < 13) return Math.round(4600 + ((h - 9) / 4) * (5500 - 4600));
+  if (h < 16.5) return Math.round(5500 - ((h - 13) / 3.5) * (5500 - 4200));
+  if (h < 19.5) return Math.round(4200 - ((h - 16.5) / 3) * (4200 - 2900));
+  if (h < 22) return Math.round(2900 - ((h - 19.5) / 2.5) * (2900 - 2200));
+  return 2200;
+}
+
+const STARTUP_LNK = path.join(
+  process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
+  'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup',
+  'House Control Server.lnk'
+);
+
+function getWindowsAutostartStatus() {
+  return {
+    enabled: fs.existsSync(STARTUP_LNK),
+    shortcutPath: STARTUP_LNK,
+    vbsPath: path.join(ROOT_DIR, 'start-background.vbs'),
+  };
+}
+
+async function setWindowsAutostart(enable) {
+  const vbsPath = path.join(ROOT_DIR, 'start-background.vbs');
+  if (!enable) {
+    try {
+      if (fs.existsSync(STARTUP_LNK)) fs.unlinkSync(STARTUP_LNK);
+      logEvent('Disabled Windows Startup auto-launch');
+    } catch { /* ignore */ }
+    return getWindowsAutostartStatus();
+  }
+  await new Promise((resolve, reject) => {
+    const psScript = `$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut('${STARTUP_LNK.replace(/'/g, "''")}'); $s.TargetPath = 'wscript.exe'; $s.Arguments = '"${vbsPath.replace(/'/g, "''")}"'; $s.WorkingDirectory = '${ROOT_DIR.replace(/'/g, "''")}'; $s.Description = 'House Control Govee LAN + 3D Smart Home Server'; $s.Save()`;
+    execFile('powershell.exe', ['-NoProfile', '-Command', psScript], (err) => {
+      if (err) reject(err);
+      else resolve();
+    });
+  });
+  logEvent('Enabled Windows Startup auto-launch');
+  return getWindowsAutostartStatus();
+}
+
 class ScheduleManager {
   constructor() {
     const defaultSchedules = [
@@ -1303,18 +1355,132 @@ class ScheduleManager {
     ];
     this.schedules = readJSON(FILES.schedules, defaultSchedules);
     if (!Array.isArray(this.schedules)) this.schedules = defaultSchedules;
+    this.modes = readJSON(FILES.modes, {
+      circadian: false,
+      awayPresence: false,
+      electricityRate: 0.16,
+    });
+    this.sleepTimers = new Map();
+    this.lastCircadianKelvin = null;
+    this.lastAwayCycleAt = 0;
     this.save();
   }
 
   save() {
     writeJSON(FILES.schedules, this.schedules);
+    writeJSON(FILES.modes, this.modes);
   }
 
   listPayload() {
+    const now = Date.now();
+    const activeTimers = [];
+    for (const [id, t] of this.sleepTimers.entries()) {
+      const remSec = Math.max(0, Math.round((t.endsAt - now) / 1000));
+      if (remSec <= 0) this.sleepTimers.delete(id);
+      else activeTimers.push({
+        ...t,
+        target: id,
+        remainingSec: remSec,
+        remainingMin: Math.max(1, Math.ceil(remSec / 60)),
+      });
+    }
     return {
       schedules: this.schedules,
       sun: computeSunTimes(),
+      circadianKelvin: computeCircadianKelvin(),
+      modes: { ...this.modes, awayMode: Boolean(this.modes.awayPresence) },
+      sleepTimers: activeTimers,
+      autostart: getWindowsAutostartStatus(),
     };
+  }
+
+  setModes(patch = {}) {
+    if ('circadian' in patch) this.modes.circadian = Boolean(patch.circadian);
+    if ('awayPresence' in patch) this.modes.awayPresence = Boolean(patch.awayPresence);
+    if ('awayMode' in patch) this.modes.awayPresence = Boolean(patch.awayMode);
+    if ('electricityRate' in patch && Number.isFinite(Number(patch.electricityRate))) {
+      this.modes.electricityRate = Math.max(0.01, Number(patch.electricityRate));
+    }
+    this.save();
+    if (this.modes.circadian) {
+      this.applyCircadianStep(true).catch(() => {});
+    }
+    return this.listPayload();
+  }
+
+  startSleepTimer({ target = '', targetKind = 'all', targetId = '', label = 'Sleep Timer', minutes = 30 }) {
+    if (target) {
+      if (target === 'all') {
+        targetKind = 'all';
+        targetId = '';
+      } else if (target.includes(':')) {
+        const [k, v] = target.split(':');
+        targetKind = k;
+        targetId = v || '';
+      }
+    }
+    const mins = Math.max(1, Math.min(240, Number(minutes) || 30));
+    const id = `${targetKind}:${targetId || 'all'}`;
+    const entry = {
+      id,
+      label: label || `Sleep (${mins}m)`,
+      targetKind,
+      targetId: String(targetId || ''),
+      durationMins: mins,
+      startedAt: Date.now(),
+      endsAt: Date.now() + mins * 60_000,
+    };
+    this.sleepTimers.set(id, entry);
+    logEvent(`Started ${mins}m sleep timer for ${entry.label}`);
+    return this.listPayload();
+  }
+
+  cancelSleepTimer(id) {
+    this.sleepTimers.delete(id);
+    return this.listPayload();
+  }
+
+  async applyCircadianStep(force = false) {
+    const kelvin = computeCircadianKelvin();
+    if (!force && this.lastCircadianKelvin && Math.abs(kelvin - this.lastCircadianKelvin) < 40) return;
+    this.lastCircadianKelvin = kelvin;
+    const plan = plans.currentPlanObject();
+    const lights = (plan.lights || []).filter((l) => !l.disabled && (l.capabilities || []).includes('temp'));
+    const lightsUpdate = {};
+    const links = activeLinks();
+    for (const l of lights) {
+      const link = links.get(l.id);
+      const st = link?.service === 'govee' ? govee.states.get(link.id) : null;
+      if (st?.on || force) {
+        const patch = { temp: kelvin, color: null };
+        lightsUpdate[l.id] = patch;
+        if (st?.on) {
+          await handleBridgeMessage({ type: 'command', kind: 'light', id: l.id, patch, state: { on: true, ...patch } }).catch(() => {});
+        }
+      }
+    }
+    if (Object.keys(lightsUpdate).length) {
+      broadcastSSE('incoming', { fn: 'applyRemote', args: [{ lights: lightsUpdate }] });
+    }
+    return { kelvin, updated: Object.keys(lightsUpdate).length };
+  }
+
+  async triggerAwayStep() {
+    const plan = plans.currentPlanObject();
+    const lights = (plan.lights || []).filter((l) => !l.disabled);
+    const rooms = [...new Set(lights.map((l) => l.room))];
+    if (!rooms.length) return { ok: false };
+    const chosenRoom = rooms[Math.floor(Math.random() * rooms.length)];
+    const lightsUpdate = {};
+    for (const l of lights) {
+      const on = l.room === chosenRoom;
+      const patch = on ? { on: true, brightness: 0.65, temp: 2800, color: null } : { on: false };
+      lightsUpdate[l.id] = patch;
+      await handleBridgeMessage({ type: 'command', kind: 'light', id: l.id, patch, state: patch }).catch(() => {});
+    }
+    broadcastSSE('incoming', { fn: 'adopt', args: [{ lights: lightsUpdate, source: 'Away Presence' }] });
+    logEvent(`Away Presence simulator cycled active lights to room "${chosenRoom}"`);
+    return { ok: true, room: chosenRoom };
   }
 
   upsert(entry) {
@@ -1391,11 +1557,67 @@ class ScheduleManager {
 
   async tick() {
     const now = new Date();
+    const nowMs = Date.now();
     const day = now.getDay();
     const curMins = now.getHours() * 60 + now.getMinutes();
     const todayKey = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
     const sun = computeSunTimes(now);
 
+    // 1. Check active countdown sleep timers
+    for (const [id, t] of this.sleepTimers.entries()) {
+      const remMs = t.endsAt - nowMs;
+      if (remMs <= 0) {
+        this.sleepTimers.delete(id);
+        const plan = plans.currentPlanObject();
+        const lights = (plan.lights || []).filter((l) => !l.disabled);
+        const targets = t.targetKind === 'light'
+          ? lights.filter((l) => l.id === t.targetId)
+          : t.targetKind === 'room'
+            ? lights.filter((l) => l.room === t.targetId)
+            : lights;
+        const lightsUpdate = {};
+        for (const l of targets) {
+          lightsUpdate[l.id] = { on: false };
+          await handleBridgeMessage({ type: 'command', kind: 'light', id: l.id, patch: { on: false }, state: { on: false } }).catch(() => {});
+        }
+        if (Object.keys(lightsUpdate).length) {
+          broadcastSSE('incoming', { fn: 'adopt', args: [{ lights: lightsUpdate, source: `Sleep Timer: ${t.label}` }] });
+        }
+        logEvent(`Sleep timer completed: turned off ${t.label}`);
+      } else if (remMs <= 60_000) {
+        // Gentle dim down in the final 60 seconds
+        const plan = plans.currentPlanObject();
+        const lights = (plan.lights || []).filter((l) => !l.disabled);
+        const targets = t.targetKind === 'light'
+          ? lights.filter((l) => l.id === t.targetId)
+          : t.targetKind === 'room'
+            ? lights.filter((l) => l.room === t.targetId)
+            : lights;
+        const lightsUpdate = {};
+        for (const l of targets) {
+          lightsUpdate[l.id] = { brightness: 0.15 };
+          await handleBridgeMessage({ type: 'command', kind: 'light', id: l.id, patch: { brightness: 0.15 }, state: { on: true, brightness: 0.15 } }).catch(() => {});
+        }
+        if (Object.keys(lightsUpdate).length) {
+          broadcastSSE('incoming', { fn: 'applyRemote', args: [{ lights: lightsUpdate }] });
+        }
+      }
+    }
+
+    // 2. Circadian Rhythm ("Natural Sun") Auto-Shifting
+    if (this.modes.circadian) {
+      await this.applyCircadianStep(false);
+    }
+
+    // 3. Vacation / Away Presence Simulator (cycles lived-in rooms every 20 mins between 18:00 and 23:15)
+    if (this.modes.awayPresence && curMins >= 18 * 60 && curMins <= 23 * 60 + 15) {
+      if (nowMs - this.lastAwayCycleAt > 20 * 60_000) {
+        this.lastAwayCycleAt = nowMs;
+        await this.triggerAwayStep();
+      }
+    }
+
+    // 4. Time & Sunrise/Sunset Schedules
     for (const s of this.schedules) {
       if (!s.enabled) continue;
       if (Array.isArray(s.days) && !s.days.includes(day)) continue;
@@ -1462,7 +1684,7 @@ async function handleBridgeMessage(msg) {
     }
 
     case 'plan.restore': {
-      const restored = plans.restoreBackup(msg.id);
+      const restored = plans.restoreBackup(msg.id || msg.filename);
       broadcastSSE('reload', {});
       return { ok: true, config: restored, backups: plans.listBackups() };
     }
@@ -1508,6 +1730,26 @@ async function handleBridgeMessage(msg) {
       const target = scheduler.schedules.find((s) => s.id === msg.id) || msg.schedule;
       if (target) await scheduler.executeSchedule(target);
       return { ok: true };
+    }
+
+    case 'schedules.setModes':
+      return scheduler.setModes(msg.modes || msg);
+
+    case 'schedules.sleepStart':
+      return scheduler.startSleepTimer(msg);
+
+    case 'schedules.sleepCancel':
+      return scheduler.cancelSleepTimer(msg.id || msg.target);
+
+    case 'schedules.awayStep':
+      return await scheduler.triggerAwayStep();
+
+    case 'schedules.circadianStep':
+      return await scheduler.applyCircadianStep(true);
+
+    case 'system.autostart': {
+      if ('enable' in msg || 'enabled' in msg) return await setWindowsAutostart(Boolean(msg.enable ?? msg.enabled));
+      return getWindowsAutostartStatus();
     }
 
     case 'devices.syncNow': {
