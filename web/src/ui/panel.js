@@ -4,6 +4,8 @@ import * as THREE from 'three';
 import { h, clamp, createSlider, createColorPad, openMenu } from './dom.js';
 import { icon } from './icons.js';
 import { createQRCodeSVG } from './qr.js';
+import { createVoiceController, createScreenSync, createAudioReactive, executeNaturalCommand } from './mediaSync.js';
+import { computeCircadianKelvin } from '../config.js';
 import { lightColor } from '../three/lights.js';
 import { MODE_COLORS } from '../three/ac.js';
 import { AC_SWINGS } from '../store.js';
@@ -72,8 +74,46 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
   let scenesCollapsed = false;
   let roomsBarCollapsed = false;
   let panelMinimized = false;
+  let electricityRate = Number(localStorage.getItem('house-control:elec-rate') || '0.16') || 0.16;
+
+  const getColorTargetIds = () => config.lights
+    .filter((l) => (ui.room === 'all' || l.room === ui.room) && l.capabilities.includes('color'))
+    .map((l) => l.id);
+
+  const screenSync = createScreenSync({
+    getTargetLightIds: getColorTargetIds,
+    store,
+    onUpdate: () => { updateEnvButtons(); sheetView?.update?.(); },
+  });
+
+  const audioReactive = createAudioReactive({
+    getTargetLightIds: getColorTargetIds,
+    store,
+    onUpdate: () => { updateEnvButtons(); sheetView?.update?.(); },
+  });
+
+  const voiceCtrl = createVoiceController({
+    config,
+    store,
+    get world() { return world; },
+    setRoom: (id) => selectRoom(id),
+    openEditor: () => { location.href = `${location.pathname}?mode=editor`; },
+  }, (st) => {
+    voiceBtn.classList.toggle('on', Boolean(st.active));
+    if (st.message) toast(st.message);
+  });
 
   const power = h('button.round.power', { title: 'Everything on / off', 'aria-label': 'Toggle everything', onclick: toggleEverything }, icon('power', 21, 2.2));
+  const voiceBtn = h('button.round', {
+    title: 'Voice Control — speak a natural command (e.g. "Kitchen Island 50%", "All lights off")',
+    'aria-label': 'Voice Control',
+    onclick: () => { haptic('light'); voiceCtrl.toggle(); },
+  }, icon('mic', 16));
+  const cmdBtn = h('button.round', {
+    title: 'Command & Search Palette (Ctrl+K)',
+    'aria-label': 'Command Palette',
+    onclick: () => { haptic('light'); openSheet({ kind: 'commandPalette' }); },
+  }, icon('search', 16));
   const editPlanBtn = h('button.round', { title: 'Open 2D Floor Plan Editor', 'aria-label': 'Open 2D Floor Plan Editor', onclick: () => { location.href = `${location.pathname}?mode=editor`; } }, icon('box', 16));
   const gear = h('button.round', { title: 'Menu & views', 'aria-label': 'Floor plan menu', onclick: () => onMenu(gear) }, icon('settings', 17));
   const aiBadge = h('button.ai-badge', { hidden: true, title: 'An AI assistant has access — click to manage', 'aria-label': 'AI access',
@@ -113,6 +153,17 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
     },
   }, 'Rooms ▾');
 
+  const walkBtn = h('button.pill.tiny', {
+    title: 'Toggle 1st-Person Walkthrough Mode (WASD / Arrow keys to walk inside rooms, click floor to glide)',
+    onclick: () => {
+      if (!world) return;
+      const next = !world.getWalkthrough?.();
+      world.setWalkthrough?.(next, ui.room === 'all' ? null : ui.room);
+      updateEnvButtons();
+      toast(next ? '1st-Person Walkthrough ON — use WASD/Arrows to walk, drag to look, click doors/lights!' : 'Returned to 3D Orbit View');
+    },
+  }, icon('walk', 12), 'Walk');
+
   const cutawayBtn = h('button.pill.tiny', {
     title: 'Cycle Sims-style 3D wall cutaway (Auto Cutaway → Low Walls → Full Walls)',
     onclick: () => {
@@ -137,8 +188,31 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
     },
   }, 'Sky: Night');
 
+  const weatherBtn = h('button.pill.tiny', {
+    title: 'Cycle 3D outdoor weather particles (Clear → Rain → Snow → Twinkling Stars)',
+    onclick: () => {
+      if (!world) return;
+      const order = ['clear', 'rain', 'snow', 'stars'];
+      const cur = world.getWeatherMode?.() || 'clear';
+      const next = order[(order.indexOf(cur) + 1) % order.length];
+      world.setWeatherMode?.(next);
+      updateEnvButtons();
+      toast(`Outdoor 3D weather: ${next.toUpperCase()}`);
+    },
+  }, icon('rain', 12), 'Weather: Clear');
+
+  const studioBtn = h('button.pill.tiny', {
+    title: 'PC Screen Ambilight Sync & Live Music Beats',
+    onclick: () => openSheet({ kind: 'studio' }),
+  }, icon('screen', 12), 'Ambilight & Beats');
+
+  const energyBtn = h('button.pill.tiny', {
+    title: 'Live Energy & Wattage Monitor + Monthly Cost Estimator',
+    onclick: () => openSheet({ kind: 'energy' }),
+  }, icon('zap', 12), '0W');
+
   const schedulesBtn = h('button.pill.tiny', {
-    title: 'Manage automated light schedules & sunset timers',
+    title: 'Manage automated light schedules, Circadian sun mode, Sleep timers & Away mode',
     onclick: () => openSheet({ kind: 'schedules' }),
   }, icon('clock', 12), 'Schedules');
 
@@ -174,18 +248,48 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
     },
   }, 'Minimize ▼');
 
+  function computeActiveWatts() {
+    let totalW = 0;
+    for (const l of config.lights) {
+      const s = state.lights[l.id];
+      if (!s?.on) continue;
+      const lvl = l.capabilities.includes('brightness') ? Math.max(0.1, s.brightness) : 1;
+      totalW += (l.watts || 10) * lvl;
+    }
+    for (const a of config.acs) {
+      if (state.acs[a.id]?.on) totalW += 650;
+    }
+    return Math.round(totalW * 10) / 10;
+  }
+
   function updateEnvButtons() {
+    const isWalk = Boolean(world?.getWalkthrough?.());
+    walkBtn.classList.toggle('active', isWalk);
+    walkBtn.replaceChildren(icon('walk', 12), isWalk ? 'Exit Walk' : 'Walk 3D');
     const cMode = world?.getCutawayMode?.() || localStorage.getItem('house-control:cutaway') || 'auto';
     cutawayBtn.textContent = cMode === 'auto' ? 'Walls: Auto' : cMode === 'low' ? 'Walls: Low' : 'Walls: Full';
     const lMode = world?.getLightingMode?.() || localStorage.getItem('house-control:lighting') || 'night';
     skyBtn.textContent = lMode === 'night' ? 'Sky: Night' : lMode === 'day' ? 'Sky: Day' : 'Sky: Auto';
+    const wMode = world?.getWeatherMode?.() || localStorage.getItem('house-control:weather') || 'clear';
+    weatherBtn.replaceChildren(icon('rain', 12), `Weather: ${wMode[0].toUpperCase()}${wMode.slice(1)}`);
+    studioBtn.classList.toggle('active', screenSync.active || audioReactive.active);
+    studioBtn.replaceChildren(
+      icon(audioReactive.active ? 'music' : 'screen', 12),
+      screenSync.active ? 'Ambilight: LIVE' : audioReactive.active ? 'Beats: LIVE' : 'Ambilight & Beats'
+    );
+    const activeW = computeActiveWatts();
+    energyBtn.replaceChildren(icon('zap', 12), `${activeW}W`);
   }
 
   const navBar = h('div.panel-nav-toggles',
     toggleScenesBtn,
     toggleRoomsBtn,
+    walkBtn,
     cutawayBtn,
     skyBtn,
+    weatherBtn,
+    studioBtn,
+    energyBtn,
     schedulesBtn,
     qrBtn,
     syncBtn,
@@ -210,7 +314,7 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
     h('header.top',
       h('div.home', h('div.home-badge', icon('home', 17)),
         h('div', h('div.home-name', config.name), homeSub)),
-      aiBadge, editPlanBtn, gear, power),
+      aiBadge, cmdBtn, voiceBtn, editPlanBtn, gear, power),
     tooltip, panel, sheet, toastEl);
   const card = h('div.card.booting', h('div.notch'), clip);
   root.replaceChildren(card);
@@ -491,6 +595,9 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
     else if (target.kind === 'sceneBuilder') sheetView = sceneBuilderSheet();
     else if (target.kind === 'schedules') sheetView = schedulesSheet();
     else if (target.kind === 'phoneQr') sheetView = phoneQrSheet();
+    else if (target.kind === 'studio') sheetView = studioSyncSheet();
+    else if (target.kind === 'energy') sheetView = energySheet();
+    else if (target.kind === 'commandPalette') sheetView = commandPaletteSheet();
     if (!sheetView) return;
     sheet.replaceChildren(...sheetView.nodes);
     panel.classList.add('hidden');
@@ -673,20 +780,108 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
     };
   }
 
-  /* ---------- Smart Schedules & Sunset Automation Sheet ---------- */
+  /* ---------- Smart Schedules, Circadian, Away & Sleep Timers Sheet ---------- */
 
   function schedulesSheet() {
-    const sub = h('div.sheet-sub', 'Automate scenes or rooms by time of day or local sunset');
+    const sub = h('div.sheet-sub', 'Circadian sun curve, vacation presence, sleep timers & sunset schedules');
     const body = h('div.sheet-body-scroll', h('div.sheet-note', 'Loading schedules…'));
 
     const DAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 
     async function loadAndRender() {
       try {
-        const data = await call('schedules.list');
+        const [data, autoRes] = await Promise.all([
+          call('schedules.list'),
+          call('system.autostart').catch(() => ({ enabled: false })),
+        ]);
         const list = data?.schedules || [];
         const sun = data?.sun || { sunrise: '06:30', sunset: '18:45' };
+        const modes = data?.modes || { circadian: false, awayMode: false };
+        const sleepTimers = data?.sleepTimers || [];
+        const curKelvin = computeCircadianKelvin();
 
+        // 1. Smart Automation Modes (Circadian Rhythm + Vacation/Away Presence + Windows Startup)
+        const modesRow = h('div.smart-modes-grid',
+          h(`div.smart-mode-card${modes.circadian ? '.on' : ''}`,
+            h('div.smart-mode-head',
+              icon('sun', 16),
+              h('div', h('b', 'Circadian Rhythm ("Natural Sun")'), h('span', `Target right now: ${curKelvin}K`)),
+              h(`button.pill.tiny${modes.circadian ? '.active' : ''}`, {
+                onclick: async () => {
+                  await call('schedules.setModes', { circadian: !modes.circadian });
+                  toast(!modes.circadian ? `Circadian Rhythm enabled (${curKelvin}K)` : 'Circadian Rhythm paused');
+                  loadAndRender();
+                },
+              }, modes.circadian ? 'Active' : 'Enable'),
+              h('button.pill.tiny', {
+                title: `Apply ${curKelvin}K to all active tunable lights right now`,
+                onclick: async () => {
+                  const r = await call('schedules.circadianStep');
+                  toast(`Shifted active lights to ${r?.kelvin || curKelvin}K`);
+                },
+              }, 'Apply Now'))),
+
+          h(`div.smart-mode-card${modes.awayMode ? '.on' : ''}`,
+            h('div.smart-mode-head',
+              icon('away', 16),
+              h('div', h('b', 'Vacation / Away Presence Simulator'), h('span', 'Cycles lived-in rooms during evening hours')),
+              h(`button.pill.tiny${modes.awayMode ? '.active' : ''}`, {
+                onclick: async () => {
+                  await call('schedules.setModes', { awayMode: !modes.awayMode });
+                  toast(!modes.awayMode ? 'Away Presence Simulator enabled' : 'Away Presence Simulator off');
+                  loadAndRender();
+                },
+              }, modes.awayMode ? 'Active' : 'Enable'),
+              h('button.pill.tiny', {
+                title: 'Simulate a random room presence change now',
+                onclick: async () => {
+                  await call('schedules.awayStep');
+                  toast('Simulated lived-in room switch');
+                },
+              }, 'Test Cycle'))),
+
+          h(`div.smart-mode-card${autoRes?.enabled ? '.on' : ''}`,
+            h('div.smart-mode-head',
+              icon('home', 16),
+              h('div', h('b', 'Start Server on Windows Sign-In'), h('span', 'Runs silently in the background via Startup folder')),
+              h(`button.pill.tiny${autoRes?.enabled ? '.active' : ''}`, {
+                onclick: async () => {
+                  const next = !autoRes?.enabled;
+                  await call('system.autostart', { enabled: next });
+                  toast(next ? 'Enabled Windows Startup auto-launch' : 'Removed Windows Startup shortcut');
+                  loadAndRender();
+                },
+              }, autoRes?.enabled ? 'Enabled' : 'Enable')))
+        );
+
+        // 2. Quick Sleep Fade-Out Timers
+        const sleepTargetSel = h('select.sheet-select',
+          h('option', { value: 'all' }, 'Whole Home (All Active Lights)'),
+          ...roomsWithLights.map((r) => h('option', { value: `room:${r.id}` }, `Room: ${r.name}`)));
+        const sleepQuickBtns = [15, 30, 45, 60, 90].map((mins) =>
+          h('button.pill.tiny', {
+            onclick: async () => {
+              const label = sleepTargetSel.options[sleepTargetSel.selectedIndex].text;
+              await call('schedules.sleepStart', { target: sleepTargetSel.value, minutes: mins, label });
+              toast(`Sleep fade-out timer started (${mins}m · ${label})`);
+              loadAndRender();
+            },
+          }, icon('timer', 12), `${mins}m`)
+        );
+
+        const activeTimersNodes = sleepTimers.map((t) =>
+          h('div.sched-row.on',
+            h('div.sched-main', h('b', `Sleep Fade: ${t.label}`), h('span', ` ~${t.remainingMin} min remaining`)),
+            h('div.sched-actions',
+              h('button.pill.tiny.danger', {
+                onclick: async () => {
+                  await call('schedules.sleepCancel', { target: t.target });
+                  toast('Cancelled sleep timer');
+                  loadAndRender();
+                },
+              }, 'Cancel'))));
+
+        // 3. Classic Time / Sunset / Sunrise Schedules
         const nameIn = h('input.sheet-input', { type: 'text', placeholder: 'Schedule name (e.g. Sunset Porch)' });
         const triggerSel = h('select.sheet-select',
           h('option', { value: 'sunset' }, `At Sunset (~${sun.sunset})`),
@@ -726,8 +921,14 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
 
         body.replaceChildren(
           h('div.sun-banner',
-            h('span', icon('sun', 15), ` Sunrise today: ${sun.sunrise}`),
-            h('span', icon('moon', 15), ` Sunset today: ${sun.sunset}`)),
+            h('span', icon('sun', 15), ` Sunrise: ${sun.sunrise}`),
+            h('span', icon('moon', 15), ` Sunset: ${sun.sunset}`)),
+          h('div.field-label', h('span', 'Smart Automation & System Modes')),
+          modesRow,
+          h('div.field-label', h('span', 'Countdown Sleep Timer (Gradual Dim to Off)')),
+          sleepTargetSel,
+          h('div.scene-icon-picker', ...sleepQuickBtns),
+          ...activeTimersNodes,
           h('div.field-label', h('span', `Saved Schedules (${list.length})`)),
           ...list.map((s) => {
             const whenLabel = s.trigger === 'sunset'
@@ -773,7 +974,278 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
     loadAndRender();
 
     return {
-      nodes: [sheetHead('Schedules & Timers', sub), body],
+      nodes: [sheetHead('Schedules, Sun & Timers', sub), body],
+      update() {},
+    };
+  }
+
+  /* ---------- Media Studio Sheet (PC Screen Ambilight + Audio Beat Sync) ---------- */
+
+  function studioSyncSheet() {
+    const sub = h('div.sheet-sub', 'Sync your room lights in real time with movies, games or music');
+    const swatchEl = h('div.studio-color-preview', { style: { background: screenSync.color } });
+    const screenStatus = h('span.sheet-hint', screenSync.active ? 'Streaming dominant screen color at ~4 Hz' : 'Stopped');
+
+    const eqBass = h('div.eq-bar');
+    const eqMid = h('div.eq-bar');
+    const eqHigh = h('div.eq-bar');
+    const eqWrap = h('div.eq-wrap',
+      h('div.eq-col', eqBass, h('small', 'Bass')),
+      h('div.eq-col', eqMid, h('small', 'Mid')),
+      h('div.eq-col', eqHigh, h('small', 'High')),
+    );
+
+    const scopeSel = h('select.sheet-select',
+      h('option', { value: 'all', selected: ui.room === 'all' }, 'Sync Scope: Whole Home RGB Lights'),
+      ...roomsWithLights.map((r) => h('option', { value: r.id, selected: ui.room === r.id }, `Sync Scope: Only ${r.name}`)));
+    scopeSel.addEventListener('change', () => {
+      screenSync.setScope(scopeSel.value);
+      audioSync.setScope(scopeSel.value);
+    });
+
+    const screenBtn = h(`button.pill.primary-pill${screenSync.active ? '.active' : ''}`, {
+      onclick: async () => {
+        if (screenSync.active) {
+          screenSync.stop();
+        } else {
+          if (audioSync.active) audioSync.stop();
+          await screenSync.start(scopeSel.value);
+        }
+        renderStudioState();
+        updateEnvButtons();
+      },
+    }, icon('screen', 15), screenSync.active ? 'Stop Screen Ambilight' : 'Start PC Screen / Movie Ambilight');
+
+    const audioMicBtn = h(`button.pill.primary-pill${audioSync.active ? '.active' : ''}`, {
+      onclick: async () => {
+        if (audioSync.active) {
+          audioSync.stop();
+        } else {
+          if (screenSync.active) screenSync.stop();
+          await audioSync.start(scopeSel.value, 'mic');
+        }
+        renderStudioState();
+        updateEnvButtons();
+      },
+    }, icon('music', 15), audioSync.active ? 'Stop Audio Beat Sync' : 'Start Mic / Room Music Beat Sync');
+
+    const audioTabBtn = h('button.pill', {
+      onclick: async () => {
+        if (screenSync.active) screenSync.stop();
+        await audioSync.start(scopeSel.value, 'display');
+        renderStudioState();
+        updateEnvButtons();
+      },
+    }, icon('screen', 14), 'Sync System / Tab Audio');
+
+    function renderStudioState() {
+      swatchEl.style.background = screenSync.color;
+      screenStatus.textContent = screenSync.active ? `Live color: ${screenSync.color.toUpperCase()}` : 'Idle — click Start to pick a monitor or window';
+      screenBtn.classList.toggle('active', screenSync.active);
+      screenBtn.replaceChildren(icon('screen', 15), screenSync.active ? 'Stop Screen Ambilight' : 'Start PC Screen / Movie Ambilight');
+      audioMicBtn.classList.toggle('active', audioSync.active);
+      audioMicBtn.replaceChildren(icon('music', 15), audioSync.active ? 'Stop Audio Beat Sync' : 'Start Mic / Room Music Beat Sync');
+      const lv = audioSync.levels;
+      eqBass.style.height = `${Math.max(8, Math.round(lv.bass * 100))}%`;
+      eqMid.style.height = `${Math.max(8, Math.round(lv.mid * 100))}%`;
+      eqHigh.style.height = `${Math.max(8, Math.round(lv.high * 100))}%`;
+    }
+
+    return {
+      nodes: [
+        sheetHead('Ambilight & Music Studio', sub),
+        h('div.sheet-body-scroll',
+          scopeSel,
+          h('div.field-label', h('span', 'PC Screen / Movie "Ambilight" Sync')),
+          h('div.studio-card',
+            swatchEl,
+            h('div.studio-card-info',
+              h('b', 'Real-Time Display Color Sampler'),
+              screenStatus)),
+          screenBtn,
+          h('div.field-label', h('span', 'Live Music / Audio Reactive Beats')),
+          h('div.studio-card',
+            eqWrap,
+            h('div.studio-card-info',
+              h('b', 'FFT Bass / Mid / Treble Beat Pulse'),
+              h('span.sheet-hint', 'Pulses brightness on bass drops and cycles neon palettes on beats'))),
+          h('div.qr-actions', audioMicBtn, audioTabBtn)
+        ),
+      ],
+      update: renderStudioState,
+    };
+  }
+
+  /* ---------- Live Energy & Wattage Monitor Sheet ---------- */
+
+  function energySheet() {
+    const sub = h('div.sheet-sub', 'Live wattage draw, room breakdown & monthly electricity cost estimator');
+    let ratePerKwh = Number(localStorage.getItem('house.kwhRate') || 0.16);
+    let avgHoursPerDay = Number(localStorage.getItem('house.avgHours') || 5);
+    const body = h('div.sheet-body-scroll');
+
+    function renderEnergy() {
+      const totalWatts = computeActiveWatts();
+      const monthlyKwh = (totalWatts / 1000) * avgHoursPerDay * 30;
+      const monthlyCost = monthlyKwh * ratePerKwh;
+
+      // Per-room breakdown
+      const roomRows = roomsWithLights.map((r) => {
+        let rWatts = 0;
+        let rMax = 0;
+        for (const l of config.lights) {
+          if (l.room !== r.id) continue;
+          const maxW = Number(l.watts) || 9;
+          rMax += maxW;
+          const st = state.lights[l.id];
+          if (st?.on) {
+            const b = l.capabilities.includes('brightness') ? clamp(st.brightness ?? 1, 0.05, 1) : 1;
+            rWatts += maxW * (0.15 + 0.85 * b);
+          }
+        }
+        return { name: r.name, watts: Math.round(rWatts * 10) / 10, max: rMax, id: r.id };
+      }).sort((a, b) => b.watts - a.watts);
+
+      const rateInput = h('input.sheet-input', {
+        type: 'number', step: '0.01', min: '0.01', max: '2.00', value: String(ratePerKwh),
+        onchange: (ev) => {
+          ratePerKwh = Math.max(0.01, Number(ev.target.value) || 0.16);
+          localStorage.setItem('house.kwhRate', String(ratePerKwh));
+          renderEnergy();
+        },
+      });
+
+      const hoursInput = h('input.sheet-input', {
+        type: 'number', step: '0.5', min: '0.5', max: '24', value: String(avgHoursPerDay),
+        onchange: (ev) => {
+          avgHoursPerDay = clamp(Number(ev.target.value) || 5, 0.5, 24);
+          localStorage.setItem('house.avgHours', String(avgHoursPerDay));
+          renderEnergy();
+        },
+      });
+
+      body.replaceChildren(
+        h('div.energy-kpi-row',
+          h('div.energy-kpi', h('small', 'Live Draw'), h('b', `${totalWatts} W`)),
+          h('div.energy-kpi', h('small', 'Est. Monthly'), h('b', `${monthlyKwh.toFixed(1)} kWh`)),
+          h('div.energy-kpi', h('small', 'Est. Cost / Mo'), h('b', `$${monthlyCost.toFixed(2)}`))),
+        h('div.field-label', h('span', 'Room Power Breakdown')),
+        ...roomRows.map((r) => {
+          const pct = r.max > 0 ? Math.min(100, Math.round((r.watts / r.max) * 100)) : 0;
+          return h('div.energy-room-row',
+            h('div.energy-room-top', h('b', r.name), h('span', `${r.watts}W / ${r.max}W max`)),
+            h('div.energy-bar-track', h('div.energy-bar-fill', { style: { width: `${pct}%` } })));
+        }),
+        h('div.field-label', h('span', 'Cost Estimator Settings ($/kWh & Avg Hours/Day)')),
+        h('div.sched-form-row', rateInput, hoursInput)
+      );
+    }
+
+    renderEnergy();
+    return {
+      nodes: [sheetHead('Live Energy & Cost Monitor', sub), body],
+      update: renderEnergy,
+    };
+  }
+
+  /* ---------- Command Palette & Natural Language Bar (Ctrl + K) ---------- */
+
+  function commandPaletteSheet() {
+    const sub = h('div.sheet-sub', 'Type any room, light, scene, or natural command (e.g. "dim kitchen to 30%")');
+    const searchIn = h('input.sheet-input.cmd-search-input', {
+      type: 'text',
+      placeholder: 'Search or type a command… (Enter to run)',
+      value: '',
+    });
+    const resultsBox = h('div.cmd-results');
+
+    const allActions = [
+      ...config.scenes.map((sc) => ({
+        title: `Scene: ${sc.name}`,
+        sub: 'Apply lighting scene',
+        icon: sc.icon || 'sparkles',
+        keywords: `scene ${sc.name.toLowerCase()}`,
+        run: () => { store.applyScene(sc.id); toast(`Applied scene "${sc.name}"`); closeSheet(); },
+      })),
+      ...roomsWithLights.map((r) => ({
+        title: `Room: ${r.name} (Focus)`,
+        sub: 'Filter lights & focus camera on room',
+        icon: 'home',
+        keywords: `room ${r.name.toLowerCase()}`,
+        run: () => { closeSheet(); selectRoom(r.id); },
+      })),
+      ...config.lights.map((l) => ({
+        title: `${l.name}`,
+        sub: `${roomName.get(l.room) || l.room} · Toggle or open detail`,
+        icon: l.type || 'bulb',
+        keywords: `${l.name.toLowerCase()} ${(roomName.get(l.room) || '').toLowerCase()}`,
+        run: () => { toggleLight(l.id); closeSheet(); },
+      })),
+      {
+        title: 'First-Person Walkthrough Mode (WASD)',
+        sub: 'Toggle eye-level 3D camera inside the house',
+        icon: 'walk',
+        keywords: 'walk walkthrough 3d first person wasd',
+        run: () => {
+          const next = !world?.getWalkthrough?.();
+          world?.setWalkthrough?.(next);
+          updateEnvButtons();
+          closeSheet();
+        },
+      },
+      {
+        title: 'Open 2D Floor Plan & Furniture Editor',
+        sub: 'Edit rooms, wall colors, furniture & blueprint underlay',
+        icon: 'edit',
+        keywords: 'edit editor floor plan blueprint walls',
+        run: () => { location.href = '/?edit=1'; },
+      },
+    ];
+
+    function renderResults() {
+      const q = searchIn.value.trim().toLowerCase();
+      const filtered = q
+        ? allActions.filter((a) => a.keywords.includes(q) || a.title.toLowerCase().includes(q)).slice(0, 8)
+        : allActions.slice(0, 8);
+
+      resultsBox.replaceChildren(
+        ...(q ? [
+          h('button.cmd-item.natural', {
+            onclick: () => {
+              const res = executeNaturalCommand(searchIn.value, { config, state, store, world, selectRoom, openSheet });
+              toast(res.summary, 'Command');
+              updateEnvButtons();
+              closeSheet();
+            },
+          }, icon('sparkles', 16), h('div.cmd-item-text', h('b', `Run command: "${searchIn.value}"`), h('small', 'Natural language smart-home parser'))),
+        ] : []),
+        ...filtered.map((item) =>
+          h('button.cmd-item', { onclick: item.run },
+            icon(item.icon, 16),
+            h('div.cmd-item-text', h('b', item.title), h('small', item.sub)))
+        )
+      );
+    }
+
+    searchIn.addEventListener('input', renderResults);
+    searchIn.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter' && searchIn.value.trim()) {
+        ev.preventDefault();
+        const res = executeNaturalCommand(searchIn.value, { config, state, store, world, selectRoom, openSheet });
+        toast(res.summary, 'Command');
+        updateEnvButtons();
+        closeSheet();
+      }
+    });
+
+    renderResults();
+    setTimeout(() => searchIn.focus(), 40);
+
+    return {
+      nodes: [
+        sheetHead('Command Palette (Ctrl + K)', sub),
+        h('div.sheet-body-scroll', searchIn, resultsBox),
+      ],
       update() {},
     };
   }
@@ -965,13 +1437,26 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
         `${roomName.get(cfg.room)} · drag across a light tile to dim it, or ${isPhone ? 'tap' : 'click'} the lamp in the 3D view to toggle.`));
     }
 
+    // Quick Sleep Fade-Out Timer for this specific fixture
+    const timerRow = h('div.dynamic-effects-row',
+      ...[15, 30, 60].map((mins) =>
+        h('button.pill.tiny', {
+          onclick: async () => {
+            await call('schedules.sleepStart', { target: `light:${id}`, minutes: mins, label: cfg.name });
+            toast(`${cfg.name}: ${mins}m sleep fade-out started`);
+          },
+        }, icon('timer', 11), `Fade ${mins}m`)));
+    nodes.push(h('div.field-label', h('span', 'Sleep Fade-Out Timer'), h('span', `${cfg.watts || 9}W max`)), timerRow);
+
     return {
       nodes,
       update() {
         const l = s();
         powerBtn.classList.toggle('on', l.on);
         favBtn.classList.toggle('on', favorites.has(id));
-        sub.replaceChildren(roomName.get(cfg.room), ' · ', h('b', l.on ? 'On' : 'Off'));
+        const maxW = Number(cfg.watts) || 9;
+        const curW = l.on ? Math.round(maxW * (caps.includes('brightness') ? (0.15 + 0.85 * l.brightness) : 1) * 10) / 10 : 0;
+        sub.replaceChildren(roomName.get(cfg.room), ' · ', h('b', l.on ? `On · ${curW}W` : 'Off'));
         big.set(caps.includes('brightness') ? Math.round(l.brightness * 100) : l.on ? 100 : 0, !l.on);
         sliders.brightness?.set(Math.round(l.brightness * 100));
         sliders.temp?.set(l.temp);
@@ -1062,6 +1547,7 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
     for (const t of tiles.values()) t.update();
     for (const ft of favTiles.values()) ft.update();
     sheetView?.update();
+    updateEnvButtons();
     const m = css(mood());
     card.style.setProperty('--mood', m);
   }
@@ -1076,7 +1562,21 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
 
   store.on(() => update());
   window.addEventListener('keydown', (ev) => {
-    if (ev.key === 'Escape' && !closeSheet()) onMenu(null, 'escape');
+    if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'k') {
+      ev.preventDefault();
+      if (ui.sheet?.kind === 'commandPalette') closeSheet();
+      else openSheet({ kind: 'commandPalette' });
+      return;
+    }
+    if (ev.key === 'Escape') {
+      if (world?.getWalkthrough?.()) {
+        world.setWalkthrough(false);
+        updateEnvButtons();
+        toast('Exited First-Person Walkthrough');
+        return;
+      }
+      if (!closeSheet()) onMenu(null, 'escape');
+    }
   });
 
   layoutTiles();
