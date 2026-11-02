@@ -878,10 +878,30 @@ export async function bootEditor(root) {
       sv('rect', { x: b.minX - 40, y: b.minZ - 40, width: 120, height: 120, fill: 'url(#grid)', 'data-kind': 'none' }),
     ];
 
+    if (doc.underlay?.url && doc.underlay.visible !== false) {
+      const u = doc.underlay;
+      const uw = Number(u.width) || 12;
+      const uh = Number(u.height) || uw * 0.75;
+      const ux = Number(u.x) || 0;
+      const uz = Number(u.z) || 0;
+      const uop = clamp(Number(u.opacity ?? 0.4), 0.05, 0.95);
+      kids.push(sv('image', {
+        href: u.url,
+        x: ux,
+        y: uz,
+        width: uw,
+        height: uh,
+        opacity: uop,
+        preserveAspectRatio: 'none',
+        style: 'pointer-events:none',
+      }));
+    }
+
     doc.rooms.forEach((r, i) => {
       const [x, z, w, d] = r.rect;
+      const wallStroke = r.wallColor ? `stroke:${r.wallColor};stroke-width:0.08` : null;
       const g = sv('g', { class: `p-room${isSel('room', i) ? ' sel' : ''}${r.locked ? ' locked' : ''}`, 'data-kind': 'room', 'data-index': i },
-        sv('rect', { x, y: z, width: w, height: d, fill: FLOOR_FILL[r.floor] || FLOOR_FILL.oak }),
+        sv('rect', { x, y: z, width: w, height: d, fill: FLOOR_FILL[r.floor] || FLOOR_FILL.oak, style: wallStroke }),
         sv('text', { x: x + w / 2, y: z + d / 2 - 0.02, class: 'p-label' }, document.createTextNode(`${r.locked ? '🔒 ' : ''}${r.name || r.id}`)),
         sv('text', { x: x + w / 2, y: z + d / 2 + 0.3, class: 'p-dim' }, document.createTextNode(`${fix(w)} × ${fix(d)}`)));
       kids.push(g);
@@ -1426,10 +1446,78 @@ export async function bootEditor(root) {
     if (kind === 'home') {
       head('Home', 'Global settings of this plan');
       doc.camera ||= { azimuth: 34, elevation: 47 };
+      const u = doc.underlay || null;
+      const uploadBlueprint = () => {
+        const inp = h('input', { type: 'file', accept: 'image/*' });
+        inp.addEventListener('change', () => {
+          const file = inp.files?.[0];
+          if (!file) return;
+          const reader = new FileReader();
+          reader.onload = () => {
+            const img = new Image();
+            img.onload = () => {
+              snapshot('underlay-upload');
+              const aspect = img.height / Math.max(1, img.width);
+              const b = bounds();
+              const defW = Math.max(6, fix(b.maxX - b.minX));
+              doc.underlay = {
+                url: String(reader.result),
+                x: fix(b.minX),
+                z: fix(b.minZ),
+                width: defW,
+                height: fix(defW * aspect),
+                opacity: 0.42,
+                visible: true,
+              };
+              touch();
+              toast('Blueprint underlay image loaded');
+            };
+            img.src = String(reader.result);
+          };
+          reader.readAsDataURL(file);
+        });
+        inp.click();
+      };
+
       nodes.push(section('Building',
         row(bind('Wall height, m', number(0.1), { ...prop(doc, 'wallHeight', 2.6), parse: parseNum }),
           bind('Inner walls shown, m', number(0.05), { ...prop(doc, 'interiorWallHeight', 1.25), parse: parseNum })),
         bind('Outdoor temperature, °C', number(1), { ...prop(doc, 'outdoorTemp', 27), parse: parseNum })),
+      section('Blueprint / Floor Plan Image Underlay',
+        h('div.fields',
+          h('button.btn', { onclick: uploadBlueprint }, icon('image', 13), u?.url ? 'Replace Blueprint Image…' : 'Upload Blueprint Image…'),
+          u?.url ? h('button.btn', {
+            onclick: () => {
+              snapshot('underlay-toggle');
+              doc.underlay.visible = doc.underlay.visible === false;
+              touch();
+            },
+          }, u.visible === false ? 'Show Underlay' : 'Hide Underlay') : null,
+          u?.url ? h('button.btn', {
+            onclick: () => {
+              snapshot('underlay-clear');
+              delete doc.underlay;
+              touch();
+              toast('Blueprint underlay removed');
+            },
+          }, 'Clear') : null),
+        u?.url ? row(
+          bind('Origin X, m', number(0.1), { ...prop(doc.underlay, 'x', 0), parse: parseNum }),
+          bind('Origin Z, m', number(0.1), { ...prop(doc.underlay, 'z', 0), parse: parseNum })
+        ) : null,
+        u?.url ? row(
+          bind('Width, m', number(0.25), {
+            get: () => fix(doc.underlay.width ?? 12),
+            set: (nextW) => {
+              const ratio = (doc.underlay.height || 9) / Math.max(0.1, doc.underlay.width || 12);
+              doc.underlay.width = fix(nextW);
+              doc.underlay.height = fix(nextW * ratio);
+            },
+            parse: parseNum,
+          }),
+          bind('Opacity (0.05–0.95)', number(0.05), { ...prop(doc.underlay, 'opacity', 0.42), parse: parseNum })
+        ) : null,
+        h('p.note', 'Upload a screenshot or architectural floor plan to trace your exact room walls and furniture positions to scale.')),
       section('Default camera',
         row(bind('Azimuth, °', number(1), { ...prop(doc.camera, 'azimuth', 34), parse: parseNum }),
           bind('Elevation, °', number(1), { ...prop(doc.camera, 'elevation', 47), parse: parseNum })),
@@ -1565,11 +1653,50 @@ export async function bootEditor(root) {
       head('Nothing selected');
     } else if (kind === 'room') {
       head(item.name || item.id, `id: ${item.id}`);
+      const WALL_SWATCHES = [
+        ['#ded9d0', 'Default Alabaster'],
+        ['#b8c7be', 'Sage Mist'],
+        ['#d8c9b4', 'Warm Sand'],
+        ['#2c3b52', 'Navy Accent'],
+        ['#c27d63', 'Terracotta Clay'],
+        ['#3c4046', 'Charcoal Loft'],
+        ['#dec4c6', 'Soft Blush'],
+        ['#9fb6c6', 'Sky Slate'],
+      ];
+      const wallColorPicker = h('input', {
+        type: 'color',
+        value: /^#[0-9a-fA-F]{6}$/.test(item.wallColor || '') ? item.wallColor : '#ded9d0',
+        oninput: (e) => {
+          snapshot(`room-wall-${sel.index}`);
+          item.wallColor = e.target.value;
+          touch({ inspector: false });
+        },
+      });
       nodes.push(
         lockBanner(item, 'Room'),
-        section('Room',
+        section('Room & Wall Paint',
           bind('Name', text(), prop(item, 'name', '')),
-          bind('Floor', choice(FLOOR_KINDS), { ...prop(item, 'floor', 'oak'), event: 'change' })),
+          bind('Floor', choice(FLOOR_KINDS), { ...prop(item, 'floor', 'oak'), event: 'change' }),
+          h('label.field', h('span', 'Interior wall paint color'),
+            h('div.color-picker-row',
+              wallColorPicker,
+              bind('', text(), optional(item, 'wallColor')).lastChild,
+              item.wallColor ? h('button.btn', {
+                title: 'Reset to default Alabaster wall paint',
+                onclick: () => { snapshot(); delete item.wallColor; touch(); },
+              }, 'Reset') : null)),
+          h('div.furn-swatches',
+            ...WALL_SWATCHES.map(([hex, label]) => h(`button.furn-swatch${(item.wallColor || '#ded9d0').toLowerCase() === hex ? '.active' : ''}`, {
+              style: `background:${hex}`,
+              title: `${label} (${hex})`,
+              onclick: () => {
+                snapshot();
+                if (hex === '#ded9d0') delete item.wallColor;
+                else item.wallColor = hex;
+                touch();
+              },
+            }))),
+          h('p.note', 'Customizes the 3D interior wall paint facing this room.')),
         section('Position & size, m',
           row(bind('X', number(0.1), { ...at(item, 'rect', 0), parse: parseNum }), bind('Z', number(0.1), { ...at(item, 'rect', 1), parse: parseNum })),
           row(bind('Width', number(0.1), { ...at(item, 'rect', 2), parse: parseNum }), bind('Depth', number(0.1), { ...at(item, 'rect', 3), parse: parseNum })),
@@ -1638,7 +1765,8 @@ export async function bootEditor(root) {
         section('Light',
           bind('Name', text(), prop(item, 'name', '')),
           row(bind('Room', choice(doc.rooms.map((r) => [r.id, r.name || r.id])), { ...prop(item, 'room'), event: 'change' }),
-            bind('Fixture', choice(LIGHT_KINDS), { ...prop(item, 'type'), event: 'change' }))),
+            bind('Fixture', choice(LIGHT_KINDS), { ...prop(item, 'type'), event: 'change' })),
+          bind('Power rating, Watts (for Live Energy Monitor)', number(1), { ...optional(item, 'watts'), parse: optNum })),
         section('Position, m',
           row(bind('X', number(), { ...at(item, 'pos', 0), parse: parseNum }), bind('Z', number(), { ...at(item, 'pos', 1), parse: parseNum })),
           row(bind('Height (auto if empty)', number(), { ...optional(item, 'y'), parse: optNum }),

@@ -61,7 +61,7 @@ function point(intensity, y, { shadow = false, distance = 0, x = 0, z = 0 } = {}
   return light;
 }
 
-// Each fixture: { parts: Mesh[], glow: Mesh[] (emissive when on), lights: Light[], hit: [w, h, d, y] }
+// Each fixture: { parts: Mesh[], glow: Mesh[] (emissive when on), lights: Light[], hit: [w, h, d, y], rotor?: Group }
 const fixtures = {
   ceiling(cfg, H) {
     const y = cfg.y ?? H - 0.14;
@@ -85,19 +85,21 @@ const fixtures = {
       at(cyl(0.085, 0.07, 0.045, darkMetal, 20), 0, y - 0.02, 0),
     ];
 
-    // 5 pitched wooden fan blades
+    // 5 pitched wooden fan blades mounted on a rotatable rotor hub
+    const rotor = new THREE.Group();
+    rotor.position.set(0, y + 0.05, 0);
     const bladeCount = 5;
     for (let i = 0; i < bladeCount; i++) {
       const angle = (i * Math.PI * 2) / bladeCount;
       const bladeHolder = new THREE.Group();
-      bladeHolder.position.set(0, y + 0.05, 0);
       bladeHolder.rotation.y = angle;
       const arm = at(box(0.12, 0.012, 0.035, darkMetal, { r: 0.004 }), 0.18, -0.006, 0);
       const blade = at(box(0.46, 0.01, 0.115, bladeMat, { r: 0.004 }), 0.42, -0.005, 0);
       blade.rotation.x = 0.16;
       bladeHolder.add(arm, blade);
-      parts.push(bladeHolder);
+      rotor.add(bladeHolder);
     }
+    parts.push(rotor);
 
     // 3 socket arms & cups at 120° intervals:
     // Socket 1: [0, -0.22], Socket 2: [-0.19, +0.11], Socket 3: [+0.19, +0.11]
@@ -124,6 +126,7 @@ const fixtures = {
 
     return {
       parts,
+      rotor,
       glow: [bulb1],
       lights: [spot(cfg.intensity ?? 9, y - 0.09)],
       hit: [0.32, 0.36, 0.32, y - 0.05, 0, -0.22],
@@ -236,6 +239,9 @@ export class LightUnit {
     }
     this.group.add(this.model);
 
+    this.rotor = f.rotor || null;
+    this.fanSpin = 0;
+
     this.glow = f.glow.map((m) => m.material);
     this.lights = f.lights;
     for (const l of this.lights) {
@@ -286,6 +292,17 @@ export class LightUnit {
 
   update(dt) {
     if (this.delay > 0) { this.delay -= dt; return true; }
+    let rotorActive = false;
+    if (this.rotor) {
+      const targetSpin = this.goal > 0.01 ? 1 : 0;
+      this.fanSpin += (targetSpin - this.fanSpin) * (1 - Math.exp(-dt * 2.5));
+      if (this.fanSpin > 0.005) {
+        this.rotor.rotation.y += dt * 4.6 * this.fanSpin;
+        rotorActive = true;
+      } else {
+        this.fanSpin = 0;
+      }
+    }
     const k = 1 - Math.exp(-dt * (this.goal > this.level ? 7 : 5));
     const dl = this.goal - this.level;
     const dh = this.hoverGoal - this.hover;
@@ -299,7 +316,7 @@ export class LightUnit {
         this.write();
         return true;
       }
-      return false;
+      return rotorActive;
     }
     this.level += dl * k;
     this.hover += dh * (1 - Math.exp(-dt * 14));

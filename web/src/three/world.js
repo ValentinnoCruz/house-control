@@ -1,4 +1,5 @@
-// The 3D stage: renderer, camera rig, picking and the per-frame animation loop.
+// The 3D stage: renderer, camera rig (orbit + first-person walkthrough), picking,
+// weather particles, interactive doors, and the per-frame animation loop.
 import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
@@ -24,6 +25,8 @@ export function createWorld(canvas, config, store, { onHover, onPick, onMove, ed
   let isEditable = Boolean(editable);
   let cutawayMode = localStorage.getItem('house-control:cutaway') || 'auto'; // 'auto' | 'low' | 'full'
   let lightingMode = localStorage.getItem('house-control:lighting') || 'night'; // 'night' | 'day' | 'auto'
+  let weatherMode = localStorage.getItem('house-control:weather') || 'clear'; // 'clear' | 'rain' | 'snow' | 'stars'
+  let walkthrough = false;
 
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: false, powerPreference: 'high-performance' });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -36,7 +39,7 @@ export function createWorld(canvas, config, store, { onHover, onPick, onMove, ed
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(background);
 
-  const camera = new THREE.PerspectiveCamera(24, 1, 0.5, 120);
+  const camera = new THREE.PerspectiveCamera(24, 1, 0.25, 120);
 
   const { minX, minZ, maxX, maxZ } = config.bounds;
   const H = config.wallHeight;
@@ -85,13 +88,17 @@ export function createWorld(canvas, config, store, { onHover, onPick, onMove, ed
     acs.set(cfg.id, unit);
     scene.add(unit.group);
   }
-  const baseHitTargets = [...[...lights.values()].map((u) => u.hit), ...[...acs.values()].map((u) => u.hit), ...house.floors];
+  const baseHitTargets = [
+    ...[...lights.values()].map((u) => u.hit),
+    ...[...acs.values()].map((u) => u.hit),
+    ...(house.doorHits || []),
+    ...house.floors,
+  ];
 
   // Ambience + Sun/Moon directional light
   const hemi = new THREE.HemisphereLight(0x8ea6ff, 0x0b0e17, 0.42);
   scene.add(hemi);
   const moon = new THREE.DirectionalLight(0xa9c0ff, 0.6);
-  // Steep and coming from the viewer's side, so the faces we look at stay readable.
   moon.position.copy(center).add(new THREE.Vector3(camDir.x * 3.2 + 1.5, 10, camDir.z * 3.2 - 1.5));
   moon.target.position.copy(center);
   moon.castShadow = true;
@@ -127,6 +134,71 @@ export function createWorld(canvas, config, store, { onHover, onPick, onMove, ed
   }
   applyLightingEnvironment();
 
+  /* ---------- Weather Particle System ---------- */
+
+  const PARTICLE_COUNT = 420;
+  const weatherGeo = new THREE.BufferGeometry();
+  const weatherPositions = new Float32Array(PARTICLE_COUNT * 3);
+  const weatherSpeeds = new Float32Array(PARTICLE_COUNT);
+  for (let i = 0; i < PARTICLE_COUNT; i++) {
+    weatherPositions[i * 3] = minX - 4 + Math.random() * (maxX - minX + 8);
+    weatherPositions[i * 3 + 1] = Math.random() * 8;
+    weatherPositions[i * 3 + 2] = minZ - 4 + Math.random() * (maxZ - minZ + 8);
+    weatherSpeeds[i] = 0.65 + Math.random() * 0.7;
+  }
+  weatherGeo.setAttribute('position', new THREE.BufferAttribute(weatherPositions, 3));
+  const weatherMat = new THREE.PointsMaterial({
+    color: 0x9ec5ff,
+    size: 0.09,
+    transparent: true,
+    opacity: 0.75,
+    depthWrite: false,
+  });
+  const weatherPoints = new THREE.Points(weatherGeo, weatherMat);
+  weatherPoints.visible = weatherMode !== 'clear';
+  scene.add(weatherPoints);
+
+  function configureWeatherMaterial() {
+    weatherPoints.visible = weatherMode !== 'clear';
+    if (weatherMode === 'rain') {
+      weatherMat.color.setHex(0x7dd3fc);
+      weatherMat.size = 0.075;
+      weatherMat.opacity = 0.72;
+    } else if (weatherMode === 'snow') {
+      weatherMat.color.setHex(0xf8fafc);
+      weatherMat.size = 0.12;
+      weatherMat.opacity = 0.88;
+    } else if (weatherMode === 'stars') {
+      weatherMat.color.setHex(0xfef08a);
+      weatherMat.size = 0.11;
+      weatherMat.opacity = 0.82;
+    }
+  }
+  configureWeatherMaterial();
+
+  function updateWeather(dt, nowSec) {
+    if (weatherMode === 'clear') return false;
+    const pos = weatherGeo.attributes.position.array;
+    if (weatherMode === 'stars') {
+      weatherMat.opacity = 0.58 + 0.28 * Math.sin(nowSec * 2.1);
+      return true;
+    }
+    const fallRate = weatherMode === 'rain' ? 6.8 : 1.35;
+    const driftX = weatherMode === 'rain' ? 0.6 : Math.sin(nowSec * 0.9) * 0.45;
+    for (let i = 0; i < PARTICLE_COUNT; i++) {
+      const idx = i * 3;
+      pos[idx] += driftX * dt * weatherSpeeds[i];
+      pos[idx + 1] -= fallRate * dt * weatherSpeeds[i];
+      if (pos[idx + 1] < -0.2) {
+        pos[idx] = minX - 4 + Math.random() * (maxX - minX + 8);
+        pos[idx + 1] = 6.5 + Math.random() * 2;
+        pos[idx + 2] = minZ - 4 + Math.random() * (maxZ - minZ + 8);
+      }
+    }
+    weatherGeo.attributes.position.needsUpdate = true;
+    return true;
+  }
+
   /* ---------- post-processing ---------- */
 
   const target = new THREE.WebGLRenderTarget(4, 4, { type: THREE.HalfFloatType, samples: 4 });
@@ -136,13 +208,25 @@ export function createWorld(canvas, config, store, { onHover, onPick, onMove, ed
   composer.addPass(bloom);
   composer.addPass(new OutputPass());
 
-  /* ---------- camera rig ---------- */
+  /* ---------- camera rig (orbit + first-person walkthrough) ---------- */
 
   const rig = {
     az: baseAz, el: config.camera.elevation, dist: 30, target: center.clone(),
     goal: { az: baseAz, el: config.camera.elevation, dist: 30, target: center.clone() },
     zoom: 1, focus: null,
   };
+
+  // First-person walkthrough state
+  const walk = {
+    pos: new THREE.Vector3(center.x, 1.62, center.z),
+    goalPos: new THREE.Vector3(center.x, 1.62, center.z),
+    yaw: 0,
+    pitch: -0.06,
+    goalYaw: 0,
+    goalPitch: -0.06,
+    keys: new Set(),
+  };
+
   let width = 1;
   let height = 1;
   let topInset = 0;    // pixels at the top covered by the header
@@ -178,21 +262,27 @@ export function createWorld(canvas, config, store, { onHover, onPick, onMove, ed
   }
 
   function frameGoal() {
+    if (walkthrough) return;
     const f = rig.focus;
     let box;
     let fill = 0.96;
     if (f?.kind === 'room') {
       const r = config.rooms.find((x) => x.id === f.id);
-      box = new THREE.Box3(new THREE.Vector3(r.x, 0, r.z), new THREE.Vector3(r.x + r.w, H * 0.75, r.z + r.d));
-      fill = 0.84;
+      if (r) {
+        box = new THREE.Box3(new THREE.Vector3(r.x, 0, r.z), new THREE.Vector3(r.x + r.w, H * 0.75, r.z + r.d));
+        fill = 0.84;
+      }
     } else if (f?.kind === 'ac') {
       const unit = acs.get(f.id);
-      const p = unit.group.position;
-      const out = new THREE.Vector3(0, 0, 1).applyQuaternion(unit.group.quaternion);
-      box = new THREE.Box3().setFromCenterAndSize(
-        new THREE.Vector3(p.x + out.x * 1.3, 1.25, p.z + out.z * 1.3), new THREE.Vector3(3.6, 2.6, 3.6));
-      fill = 0.92;
-    } else {
+      if (unit) {
+        const p = unit.group.position;
+        const out = new THREE.Vector3(0, 0, 1).applyQuaternion(unit.group.quaternion);
+        box = new THREE.Box3().setFromCenterAndSize(
+          new THREE.Vector3(p.x + out.x * 1.3, 1.25, p.z + out.z * 1.3), new THREE.Vector3(3.6, 2.6, 3.6));
+        fill = 0.92;
+      }
+    }
+    if (!box) {
       box = new THREE.Box3(new THREE.Vector3(minX, 0, minZ), new THREE.Vector3(maxX, H * 0.8, maxZ));
     }
     const { dist, center: c } = fitDistance(box, rig.goal.az, rig.goal.el, fill);
@@ -201,6 +291,44 @@ export function createWorld(canvas, config, store, { onHover, onPick, onMove, ed
   }
 
   function updateRig(dt, instant = false) {
+    if (walkthrough) {
+      const speed = 3.2;
+      let moveF = 0;
+      let moveR = 0;
+      if (walk.keys.has('KeyW') || walk.keys.has('ArrowUp')) moveF += 1;
+      if (walk.keys.has('KeyS') || walk.keys.has('ArrowDown')) moveF -= 1;
+      if (walk.keys.has('KeyD') || walk.keys.has('ArrowRight')) moveR += 1;
+      if (walk.keys.has('KeyA') || walk.keys.has('ArrowLeft')) moveR -= 1;
+
+      if (moveF || moveR) {
+        const sinY = Math.sin(walk.yaw);
+        const cosY = Math.cos(walk.yaw);
+        walk.goalPos.x = clamp(walk.goalPos.x + (-sinY * moveF + cosY * moveR) * speed * dt, minX + 0.3, maxX - 0.3);
+        walk.goalPos.z = clamp(walk.goalPos.z + (-cosY * moveF - sinY * moveR) * speed * dt, minZ + 0.3, maxZ - 0.3);
+      }
+
+      const k = instant ? 1 : 1 - Math.exp(-dt * 8);
+      const delta = walk.pos.distanceTo(walk.goalPos) * 4
+        + Math.abs(walk.goalYaw - walk.yaw)
+        + Math.abs(walk.goalPitch - walk.pitch);
+      walk.pos.lerp(walk.goalPos, k);
+      walk.yaw += (walk.goalYaw - walk.yaw) * k;
+      walk.pitch += (walk.goalPitch - walk.pitch) * k;
+
+      camera.position.copy(walk.pos);
+      const lookDir = new THREE.Vector3(
+        -Math.sin(walk.yaw) * Math.cos(walk.pitch),
+        Math.sin(walk.pitch),
+        -Math.cos(walk.yaw) * Math.cos(walk.pitch)
+      );
+      camera.up.set(0, 1, 0);
+      camera.lookAt(v.copy(walk.pos).add(lookDir));
+      if (house.updateCutaway?.(liveCamDir, 'full')) {
+        shadowFrames = Math.max(shadowFrames, 2);
+      }
+      return delta > 0.002 || moveF !== 0 || moveR !== 0;
+    }
+
     const k = instant ? 1 : 1 - Math.exp(-dt * 5.5);
     const g = rig.goal;
     const delta = Math.abs(g.az - rig.az) + Math.abs(g.el - rig.el) + Math.abs(g.dist - rig.dist) * 2
@@ -219,6 +347,21 @@ export function createWorld(canvas, config, store, { onHover, onPick, onMove, ed
     }
     return delta > 0.002;
   }
+
+  // Walkthrough keyboard listeners
+  const onKeyDown = (ev) => {
+    if (!walkthrough) return;
+    if (/^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement?.tagName || '')) return;
+    if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(ev.code)) {
+      walk.keys.add(ev.code);
+      wake(4);
+    }
+  };
+  const onKeyUp = (ev) => {
+    walk.keys.delete(ev.code);
+  };
+  window.addEventListener('keydown', onKeyDown);
+  window.addEventListener('keyup', onKeyUp);
 
   /* ---------- state sync ---------- */
 
@@ -260,9 +403,10 @@ export function createWorld(canvas, config, store, { onHover, onPick, onMove, ed
     const targets = isEditable ? [...baseHitTargets, ...furnitureMeshes] : baseHitTargets;
     const hits = raycaster.intersectObjects(targets, false);
     if (!hits.length) return null;
-    // Devices and furniture win over the room floor they stand on.
+    // Devices, doors, and furniture win over the room floor they stand on.
     const nonFloor = hits.find((h) => h.object.userData.kind && h.object.userData.kind !== 'room');
-    return (nonFloor || hits[0]).object.userData;
+    const chosen = nonFloor || hits[0];
+    return { ...chosen.object.userData, hitPoint: chosen.point };
   }
 
   function pickFloorPoint(ev, yPlane = 0) {
@@ -357,7 +501,15 @@ export function createWorld(canvas, config, store, { onHover, onPick, onMove, ed
       }
     }
 
-    drag = { x: ev.clientX, y: ev.clientY, az: rig.goal.az, el: rig.goal.el, moved: false };
+    drag = {
+      x: ev.clientX,
+      y: ev.clientY,
+      az: rig.goal.az,
+      el: rig.goal.el,
+      yaw: walk.goalYaw,
+      pitch: walk.goalPitch,
+      moved: false,
+    };
   });
 
   canvas.addEventListener('pointermove', (ev) => {
@@ -399,12 +551,18 @@ export function createWorld(canvas, config, store, { onHover, onPick, onMove, ed
       const dy = ev.clientY - drag.y;
       if (!drag.moved && Math.hypot(dx, dy) > 5) { drag.moved = true; setHover(null); canvas.style.cursor = 'grabbing'; }
       if (drag.moved) {
-        rig.goal.az = isEditable
-          ? drag.az - dx * 0.4
-          : clamp(drag.az - dx * 0.35, baseAz - ORBIT_AZ, baseAz + ORBIT_AZ);
-        rig.goal.el = clamp(drag.el + dy * 0.3, EL_MIN, EL_MAX);
-        frameGoal();
-        wake();
+        if (walkthrough) {
+          walk.goalYaw = drag.yaw + dx * 0.0045;
+          walk.goalPitch = clamp(drag.pitch + dy * 0.0035, -0.75, 0.65);
+          wake();
+        } else {
+          rig.goal.az = isEditable
+            ? drag.az - dx * 0.4
+            : clamp(drag.az - dx * 0.35, baseAz - ORBIT_AZ, baseAz + ORBIT_AZ);
+          rig.goal.el = clamp(drag.el + dy * 0.3, EL_MIN, EL_MAX);
+          frameGoal();
+          wake();
+        }
       }
       return;
     }
@@ -413,7 +571,7 @@ export function createWorld(canvas, config, store, { onHover, onPick, onMove, ed
 
   const release = (ev) => {
     fingers.delete(ev.pointerId);
-    if (pinch) { if (!fingers.size) pinch = null; return; } // lifting after a pinch picks nothing
+    if (pinch) { if (!fingers.size) pinch = null; return; }
     if (dragItem) {
       const item = dragItem;
       dragItem = null;
@@ -433,6 +591,19 @@ export function createWorld(canvas, config, store, { onHover, onPick, onMove, ed
     if (wasDrag) return;
     const t = pick(ev);
     if (!t) { onPick(null); return; }
+    if (t.kind === 'door') {
+      house.doors?.[t.index]?.toggle();
+      shadowFrames = Math.max(shadowFrames, 3);
+      wake(18);
+      return;
+    }
+    if (walkthrough && t.kind === 'room' && t.hitPoint) {
+      // In walkthrough mode, clicking the floor glides you to that spot!
+      walk.goalPos.x = clamp(t.hitPoint.x, minX + 0.35, maxX - 0.35);
+      walk.goalPos.z = clamp(t.hitPoint.z, minZ + 0.35, maxZ - 0.35);
+      wake(24);
+      return;
+    }
     if (t.kind === 'light') lights.get(t.id)?.bump();
     onPick(t);
     wake();
@@ -447,6 +618,15 @@ export function createWorld(canvas, config, store, { onHover, onPick, onMove, ed
   canvas.addEventListener('pointerleave', () => { if (!drag && !dragItem) setHover(null); });
   canvas.addEventListener('wheel', (ev) => {
     ev.preventDefault();
+    if (walkthrough) {
+      const sinY = Math.sin(walk.yaw);
+      const cosY = Math.cos(walk.yaw);
+      const step = -ev.deltaY * 0.003;
+      walk.goalPos.x = clamp(walk.goalPos.x - sinY * step, minX + 0.3, maxX - 0.3);
+      walk.goalPos.z = clamp(walk.goalPos.z - cosY * step, minZ + 0.3, maxZ - 0.3);
+      wake(10);
+      return;
+    }
     rig.zoom = clamp(rig.zoom * Math.exp(ev.deltaY * 0.0015), ZOOM_MIN, ZOOM_MAX);
     frameGoal();
     wake();
@@ -471,6 +651,8 @@ export function createWorld(canvas, config, store, { onHover, onPick, onMove, ed
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
     let active = updateRig(dt);
+    active = (house.updateDoors?.(dt) || false) || active;
+    active = updateWeather(dt, now / 1000) || active;
     for (const unit of lights.values()) active = unit.update(dt) || active;
     for (const unit of acs.values()) active = unit.update(dt) || active;
     if (shadowFrames > 0) { renderer.shadowMap.needsUpdate = true; shadowFrames--; active = true; }
@@ -494,8 +676,11 @@ export function createWorld(canvas, config, store, { onHover, onPick, onMove, ed
     composer.setPixelRatio(pr);
     composer.setSize(width, height);
     camera.aspect = width / height;
-    // Centre the model between header and panel by shifting the projection window.
-    camera.setViewOffset(width, height, 0, -(topInset - bottomInset) / 2, width, height);
+    if (walkthrough) {
+      camera.clearViewOffset();
+    } else {
+      camera.setViewOffset(width, height, 0, -(topInset - bottomInset) / 2, width, height);
+    }
     camera.updateProjectionMatrix();
     frameGoal();
     wake(3);
@@ -523,6 +708,34 @@ export function createWorld(canvas, config, store, { onHover, onPick, onMove, ed
       shadowFrames = Math.max(shadowFrames, 2);
       wake(3);
     },
+    getWeatherMode() { return weatherMode; },
+    setWeatherMode(mode) {
+      weatherMode = ['clear', 'rain', 'snow', 'stars'].includes(mode) ? mode : 'clear';
+      try { localStorage.setItem('house-control:weather', weatherMode); } catch { /* ignore */ }
+      configureWeatherMaterial();
+      wake(6);
+    },
+    getWalkthrough() { return walkthrough; },
+    setWalkthrough(on, roomId = null) {
+      walkthrough = Boolean(on);
+      camera.fov = walkthrough ? 58 : 24;
+      if (walkthrough) {
+        const rm = (roomId && config.rooms.find((r) => r.id === roomId))
+          || (rig.focus?.kind === 'room' && config.rooms.find((r) => r.id === rig.focus.id))
+          || config.rooms[0];
+        if (rm) {
+          walk.pos.set(rm.x + rm.w / 2, 1.58, rm.z + rm.d / 2);
+          walk.goalPos.copy(walk.pos);
+        }
+        walk.yaw = WalkYawFromAz(rig.az);
+        walk.goalYaw = walk.yaw;
+        walk.pitch = -0.06;
+        walk.goalPitch = -0.06;
+      }
+      resize();
+      shadowFrames = Math.max(shadowFrames, 3);
+      wake(10);
+    },
     getCameraState() { return { az: rig.az, el: rig.el, zoom: rig.zoom, focus: rig.focus }; },
     setCameraState(s) {
       if (!s) return;
@@ -540,6 +753,14 @@ export function createWorld(canvas, config, store, { onHover, onPick, onMove, ed
 
     focus(next) {
       rig.focus = next;
+      if (walkthrough && next?.kind === 'room') {
+        const rm = config.rooms.find((r) => r.id === next.id);
+        if (rm) {
+          walk.goalPos.set(rm.x + rm.w / 2, 1.58, rm.z + rm.d / 2);
+          wake(24);
+        }
+        return;
+      }
       rig.zoom = 1;
       rig.goal.az = baseAz + (next?.kind === 'ac' ? (WALL_SIDE[acs.get(next.id).cfg.wall] ?? 0) : 0);
       rig.goal.el = next?.kind === 'ac' ? 30 : config.camera.elevation;
@@ -568,6 +789,8 @@ export function createWorld(canvas, config, store, { onHover, onPick, onMove, ed
     },
 
     dispose() {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
       unsubscribe();
       running = false;
       if (raf) cancelAnimationFrame(raf);
@@ -582,6 +805,7 @@ export function createWorld(canvas, config, store, { onHover, onPick, onMove, ed
     settle(seconds = 6) {
       for (let t = 0; t < seconds; t += 0.05) {
         updateRig(0.05);
+        house.updateDoors?.(0.05);
         for (const unit of lights.values()) unit.update(0.05);
         for (const unit of acs.values()) unit.update(0.05);
       }
@@ -594,6 +818,10 @@ export function createWorld(canvas, config, store, { onHover, onPick, onMove, ed
   resize();
   updateRig(0, true);
   return world;
+}
+
+function WalkYawFromAz(az) {
+  return rad(az);
 }
 
 // Looking at an AC slightly from the side shows its airflow better.

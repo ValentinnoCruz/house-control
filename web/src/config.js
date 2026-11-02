@@ -4,6 +4,17 @@
 const LIGHT_TYPES = ['ceiling', 'fan', 'fanBulb', 'pendant', 'spots', 'floor', 'table', 'strip'];
 const WALLS = ['north', 'south', 'east', 'west'];
 
+export const DEFAULT_LIGHT_WATTS = {
+  ceiling: 14,
+  fan: 12,
+  fanBulb: 8,
+  pendant: 11,
+  spots: 15,
+  floor: 10,
+  table: 8,
+  strip: 18,
+};
+
 export class ConfigError extends Error {}
 
 export const LIGHT_KINDS = LIGHT_TYPES;
@@ -44,6 +55,21 @@ export function isWithinSeasonalWindow(seasonalFrom, seasonalTo, now = new Date(
   const cur = `${mm}-${dd}`;
   if (from <= to) return cur >= from && cur <= to;
   return cur >= from || cur <= to;
+}
+
+/**
+ * Computes the circadian ("Natural Sun") target color temperature in Kelvin for a given Date.
+ * Sunrise (07:00) -> 2700K, Solar Noon (13:00) -> 5500K, Sunset (18:30) -> 3000K, Night (21:30+) -> 2200K.
+ */
+export function computeCircadianKelvin(now = new Date()) {
+  const h = now.getHours() + now.getMinutes() / 60;
+  if (h < 6) return 2200;
+  if (h < 9) return Math.round(2200 + ((h - 6) / 3) * (4600 - 2200));
+  if (h < 13) return Math.round(4600 + ((h - 9) / 4) * (5500 - 4600));
+  if (h < 16.5) return Math.round(5500 - ((h - 13) / 3.5) * (5500 - 4200));
+  if (h < 19.5) return Math.round(4200 - ((h - 16.5) / 3) * (4200 - 2900));
+  if (h < 22) return Math.round(2900 - ((h - 19.5) / 2.5) * (2900 - 2200));
+  return 2200;
 }
 
 // The plan exactly as written on disk (the editor works on this form).
@@ -92,7 +118,14 @@ export function normalize(raw) {
       `Room "${r.id}" needs "rect": [x, z, width, depth]`);
     const [x, z, w, d] = r.rect;
     need(w > 0 && d > 0, `Room "${r.id}" has an empty rect`);
-    return { id: r.id, name: r.name || r.id, x, z, w, d, floor: r.floor || 'oak', locked: Boolean(r.locked) };
+    return {
+      id: r.id,
+      name: r.name || r.id,
+      x, z, w, d,
+      floor: r.floor || 'oak',
+      wallColor: r.wallColor || null,
+      locked: Boolean(r.locked),
+    };
   });
   const roomIds = new Set(rooms.map((r) => r.id));
 
@@ -109,10 +142,13 @@ export function normalize(raw) {
     need(isPoint(l.pos), `Light "${l.id}" needs "pos": [x, z]`);
     const seasonalActive = isWithinSeasonalWindow(l.seasonalFrom, l.seasonalTo);
     const seasonalAutoDisabled = Boolean(l.seasonalFrom && l.seasonalTo && !seasonalActive);
+    const defaultW = DEFAULT_LIGHT_WATTS[l.type] || 10;
+    const watts = Number.isFinite(Number(l.watts)) && Number(l.watts) > 0 ? Number(l.watts) : defaultW;
     return {
       ...l,
       name: l.name || l.id,
       rot: l.rot || 0,
+      watts,
       disabled: Boolean(l.disabled),
       seasonalAutoDisabled,
       locked: Boolean(l.locked),
@@ -145,6 +181,7 @@ export function normalize(raw) {
     interiorWallHeight: raw.interiorWallHeight ?? 1.25,
     camera: { azimuth: raw.camera?.azimuth ?? 34, elevation: raw.camera?.elevation ?? 47 },
     outdoorTemp: raw.outdoorTemp ?? 27,
+    underlay: raw.underlay || null,
     rooms,
     openings,
     furniture: raw.furniture || [],
