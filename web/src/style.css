@@ -1289,4 +1289,392 @@ html.ios .fatal { margin: calc(env(safe-area-inset-top, 0px) + 20px) 16px 0; wid
   color: var(--muted);
 }
 
+/* ---------- Room Master Control Bar, Multi-Light Themes & Activity Log ---------- */
+
+.room-master-bar {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 11px 13px;
+  margin-bottom: 4px;
+  border-radius: 15px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.03));
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+.room-master-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--muted);
+}
+.room-master-top span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 550;
+  color: var(--ink);
+}
+.room-master-top b {
+  color: #ffe39f;
+  font-variant-numeric: tabular-nums;
+}
+.room-master-range {
+  width: 100%;
+  accent-color: #fbbf24;
+  cursor: pointer;
+}
+.room-master-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.room-master-row.themes-scroll {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: none;
+}
+.room-master-row.themes-scroll::-webkit-scrollbar {
+  display: none;
+}
+.theme-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.theme-dot {
+  width: 14px;
+  height: 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  flex-shrink: 0;
+}
+
+.webhook-url {
+  font-family: ui-monospace, 'SF Mono', monospace;
+  font-size: 10.5px !important;
+  color: #93c5fd !important;
+  user-select: all;
+}
+.activity-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 9px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.035);
+  font-size: 11.5px;
+}
+.activity-time {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  font-size: 10.5px;
+  flex-shrink: 0;
+}
+.activity-kind {
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: rgba(96, 165, 250, 0.16);
+  color: #93c5fd;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+.activity-msg {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---------- Surface 7 Living Room Hub: Quick Dock, Standby Clock, Touch D-Pad & PIN Lock ---------- */
+
+.surface-quick-dock {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.dock-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 8px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.04));
+  color: var(--ink);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 120ms ease, background 150ms ease, border-color 150ms ease;
+}
+.dock-btn:hover, .dock-btn:active {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.28);
+  transform: translateY(-1px);
+}
+.dock-btn.dock-off {
+  background: rgba(244, 63, 94, 0.14);
+  border-color: rgba(244, 63, 94, 0.32);
+  color: #fda4af;
+}
+
+.battery-pill {
+  border-color: rgba(110, 231, 183, 0.35) !important;
+  color: #a7f3d0 !important;
+}
+.battery-pill.low {
+  background: rgba(244, 63, 94, 0.22) !important;
+  border-color: rgba(244, 63, 94, 0.6) !important;
+  color: #fecdd3 !important;
+  animation: pulse-mic 1.3s ease-in-out infinite;
+}
+
+.standby-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 95;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at center, rgba(6, 10, 22, 0.55), rgba(4, 7, 16, 0.84));
+  backdrop-filter: blur(4px);
+  opacity: 0;
+  transition: opacity 280ms ease, filter 400ms ease;
+  cursor: pointer;
+  user-select: none;
+}
+.standby-overlay.show {
+  opacity: 1;
+}
+.standby-overlay.night-dim {
+  background: rgba(2, 4, 10, 0.92);
+  filter: brightness(0.32);
+}
+.standby-hud {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 28px 42px;
+  border-radius: 28px;
+  background: rgba(12, 18, 34, 0.68);
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.65);
+  transition: transform 2.4s ease-in-out;
+}
+.standby-clock {
+  font-size: 68px;
+  font-weight: 700;
+  letter-spacing: -2px;
+  line-height: 1;
+  color: #f8fafc;
+  font-variant-numeric: tabular-nums;
+}
+.standby-ampm {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: 0;
+  color: rgba(248, 250, 252, 0.65);
+}
+.standby-date {
+  margin-top: 8px;
+  font-size: 17px;
+  font-weight: 550;
+  color: #cbd5e1;
+}
+.standby-weather {
+  margin-top: 10px;
+  padding: 5px 14px;
+  border-radius: 999px;
+  background: rgba(56, 189, 248, 0.14);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  font-size: 13px;
+  font-weight: 600;
+  color: #bae6fd;
+}
+.standby-lights {
+  margin-top: 8px;
+  font-size: 12.5px;
+  color: #fde68a;
+}
+.standby-hint {
+  margin-top: 16px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.42);
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
+.walk-touch-pad {
+  position: absolute;
+  left: 18px;
+  bottom: 24px;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px;
+  border-radius: 20px;
+  background: rgba(12, 18, 34, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  backdrop-filter: blur(14px);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+.walk-pad-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.walk-pad-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 44px);
+  grid-template-rows: repeat(3, 44px);
+  gap: 5px;
+}
+.walk-pad-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 13px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.09);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  touch-action: none;
+}
+.walk-pad-btn.active, .walk-pad-btn:active {
+  background: rgba(59, 130, 246, 0.45);
+  border-color: rgba(147, 197, 253, 0.8);
+  transform: scale(0.95);
+}
+.walk-pad-btn.exit {
+  background: rgba(244, 63, 94, 0.24);
+  border-color: rgba(244, 63, 94, 0.45);
+  color: #fda4af;
+}
+
+.pin-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 98;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(4, 8, 18, 0.76);
+  backdrop-filter: blur(8px);
+}
+.pin-modal-card {
+  width: 280px;
+  padding: 20px;
+  border-radius: 22px;
+  background: rgba(16, 23, 42, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.65);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+.pin-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 15px;
+  font-weight: 700;
+}
+.pin-sub {
+  font-size: 11.5px;
+  color: var(--muted);
+  text-align: center;
+}
+.pin-dots {
+  display: flex;
+  gap: 12px;
+  margin: 6px 0;
+}
+.pin-dots.bad .pin-dot {
+  border-color: #f43f5e;
+  background: rgba(244, 63, 94, 0.4);
+}
+.pin-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  transition: background 120ms, transform 120ms;
+}
+.pin-dot.filled {
+  background: #60a5fa;
+  border-color: #93c5fd;
+  transform: scale(1.12);
+}
+.pin-keypad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  width: 100%;
+  margin-top: 4px;
+}
+.pin-key {
+  height: 46px;
+  border-radius: 13px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.07);
+  color: #fff;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.pin-key:active {
+  background: rgba(59, 130, 246, 0.38);
+  transform: scale(0.96);
+}
+
+/* Touch-First Surface Pro 7 Ergonomics */
+@media (pointer: coarse) {
+  .tile-fav { opacity: 0.85 !important; }
+  .pill.tiny { min-height: 31px; padding: 0 11px; font-size: 12px; }
+  .dock-btn { height: 42px; font-size: 12.5px; }
+  .room { min-height: 36px; padding: 0 14px; }
+}
+.card.surface-touch .tile-fav {
+  opacity: 0.85 !important;
+}
+.card.surface-touch .pill.tiny {
+  min-height: 32px;
+  padding: 0 11px;
+  font-size: 12px;
+}
+.card.surface-touch .dock-btn {
+  height: 42px;
+  font-size: 12.5px;
+}
+.card.surface-touch .room {
+  min-height: 36px;
+  padding: 0 14px;
+}
+.card.surface-touch .round {
+  width: 40px;
+  height: 40px;
+}
+
+
+
 

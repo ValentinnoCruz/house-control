@@ -4,12 +4,19 @@ import * as THREE from 'three';
 import { h, clamp, createSlider, createColorPad, openMenu } from './dom.js';
 import { icon } from './icons.js';
 import { createQRCodeSVG } from './qr.js';
-import { createVoiceController, createScreenSync, createAudioReactive, executeNaturalCommand } from './mediaSync.js';
+import {
+  createVoiceController, createScreenSync, createAudioReactive, executeNaturalCommand,
+  MULTI_LIGHT_THEMES, applyMultiLightTheme, LIGHT_SHOW_PRESETS, createLightShowEngine, createFocusTimer,
+} from './mediaSync.js';
 import { computeCircadianKelvin } from '../config.js';
 import { lightColor } from '../three/lights.js';
 import { MODE_COLORS } from '../three/ac.js';
 import { AC_SWINGS } from '../store.js';
-import { haptic, isPhone, call } from '../bridge.js';
+import { haptic, isPhone, call, isTactileSoundEnabled, setTactileSoundEnabled } from '../bridge.js';
+import {
+  createWakeAndKioskManager, createBatteryMonitor, createStandbyScreensaver,
+  createLivingRoomDock, createWalkthroughTouchPad, createGuestPinLock,
+} from './surfaceHub.js';
 
 const MODE_LABEL = { cool: 'Cool', heat: 'Heat', dry: 'Dry', fan: 'Fan', auto: 'Auto' };
 const FAN_LABEL = { auto: 'Auto', low: 'Low', medium: 'Medium', high: 'High', turbo: 'Turbo' };
@@ -91,6 +98,36 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
     store,
     onUpdate: () => { updateEnvButtons(); sheetView?.update?.(); },
   });
+  const audioSync = audioReactive;
+
+  const lightShow = createLightShowEngine({
+    config,
+    store,
+    onUpdate: () => { updateEnvButtons(); sheetView?.update?.(); },
+  });
+
+  const focusTimer = createFocusTimer({
+    config,
+    store,
+    onToast: (msg, badge) => toast(msg, badge),
+    onUpdate: () => { updateEnvButtons(); sheetView?.update?.(); },
+  });
+
+  let liveWeatherInfo = null;
+  async function syncRealWeather(announce = false) {
+    try {
+      const w = await call('weather.sync', { force: announce });
+      if (w && w.mode) {
+        liveWeatherInfo = w;
+        world?.setWeatherMode?.(w.mode);
+        world?.setLightingMode?.(w.isDay ? 'day' : 'night');
+        updateEnvButtons();
+        if (announce) {
+          toast(`Live Weather (${w.city}): ${w.tempC}°C / ${w.tempF}°F · ${w.condition}`);
+        }
+      }
+    } catch { /* ignore */ }
+  }
 
   const voiceCtrl = createVoiceController({
     config,
@@ -104,7 +141,7 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
   });
 
   const power = h('button.round.power', { title: 'Everything on / off', 'aria-label': 'Toggle everything', onclick: toggleEverything }, icon('power', 21, 2.2));
-  const voiceBtn = h('button.round', {
+  const voiceBtn = h('button.round.voice-btn', {
     title: 'Voice Control — speak a natural command (e.g. "Kitchen Island 50%", "All lights off")',
     'aria-label': 'Voice Control',
     onclick: () => { haptic('light'); voiceCtrl.toggle(); },
@@ -114,8 +151,26 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
     'aria-label': 'Command Palette',
     onclick: () => { haptic('light'); openSheet({ kind: 'commandPalette' }); },
   }, icon('search', 16));
-  const editPlanBtn = h('button.round', { title: 'Open 2D Floor Plan Editor', 'aria-label': 'Open 2D Floor Plan Editor', onclick: () => { location.href = `${location.pathname}?mode=editor`; } }, icon('box', 16));
-  const gear = h('button.round', { title: 'Menu & views', 'aria-label': 'Floor plan menu', onclick: () => onMenu(gear) }, icon('settings', 17));
+  const kioskBtn = h('button.round', {
+    title: 'Toggle Surface Fullscreen Kiosk Mode + Screen Wake Lock',
+    'aria-label': 'Fullscreen Kiosk Mode',
+    onclick: () => wakeKiosk.toggleFullscreen(),
+  }, icon('maximize', 15));
+  const guestLockBtn = h('button.round', {
+    title: 'Guest / Kids Mode Lock (protects 2D Editor & Settings with 4-digit PIN)',
+    'aria-label': 'Guest Lock',
+    onclick: () => guestPinLock.toggleLock(),
+  }, icon('unlock', 15));
+  const editPlanBtn = h('button.round', {
+    title: 'Open 2D Floor Plan Editor',
+    'aria-label': 'Open 2D Floor Plan Editor',
+    onclick: () => guestPinLock.guard(() => { location.href = `${location.pathname}?mode=editor`; }),
+  }, icon('box', 16));
+  const gear = h('button.round', {
+    title: 'Menu & views',
+    'aria-label': 'Floor plan menu',
+    onclick: () => guestPinLock.guard(() => onMenu(gear)),
+  }, icon('settings', 17));
   const aiBadge = h('button.ai-badge', { hidden: true, title: 'An AI assistant has access — click to manage', 'aria-label': 'AI access',
     onclick: () => onMenu(aiBadge, 'agent') }, icon('sparkles', 13, 2.2), h('span', 'AI'));
 
@@ -188,10 +243,17 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
     },
   }, 'Sky: Night');
 
+  let weatherAuto = false;
   const weatherBtn = h('button.pill.tiny', {
-    title: 'Cycle 3D outdoor weather particles (Clear → Rain → Snow → Twinkling Stars)',
+    title: 'Cycle 3D outdoor weather (Clear → Rain → Snow → Stars → Live Real Weather)',
     onclick: () => {
       if (!world) return;
+      if (!weatherAuto && (world.getWeatherMode?.() || 'clear') === 'stars') {
+        weatherAuto = true;
+        syncRealWeather(true);
+        return;
+      }
+      weatherAuto = false;
       const order = ['clear', 'rain', 'snow', 'stars'];
       const cur = world.getWeatherMode?.() || 'clear';
       const next = order[(order.indexOf(cur) + 1) % order.length];
@@ -201,20 +263,54 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
     },
   }, icon('rain', 12), 'Weather: Clear');
 
-  const studioBtn = h('button.pill.tiny', {
-    title: 'PC Screen Ambilight Sync & Live Music Beats',
-    onclick: () => openSheet({ kind: 'studio' }),
-  }, icon('screen', 12), 'Ambilight & Beats');
+  const heatmapBtn = h('button.pill.tiny', {
+    title: 'Cycle 3D Room Temperature (°C) & Power Draw (Watts) Heatmap Overlay',
+    onclick: () => {
+      if (!world) return;
+      const order = ['off', 'temp', 'watts'];
+      const cur = world.getHeatmapMode?.() || 'off';
+      const next = order[(order.indexOf(cur) + 1) % order.length];
+      world.setHeatmapMode?.(next);
+      updateEnvButtons();
+      toast(next === 'off' ? '3D Heatmap: Off' : next === 'temp' ? '3D Heatmap: Room Temperature (°C)' : '3D Heatmap: Room Power Draw (Watts)');
+    },
+  }, icon('thermo', 12), 'Heatmap');
 
-  const energyBtn = h('button.pill.tiny', {
+  const camTourBtn = h('button.pill.tiny', {
+    title: 'Saved 3D Camera Bookmarks & Cinematic Auto-Orbit Tour',
+    onclick: () => openSheet({ kind: 'cameraTour' }),
+  }, icon('camera', 12), '3D Tour');
+
+  const studioBtn = h('button.pill.tiny', {
+    title: 'PC Screen Ambilight, Music Beats, Multi-Color Themes & Animated Light Shows',
+    onclick: () => openSheet({ kind: 'studio' }),
+  }, icon('screen', 12), 'Studio FX');
+
+  const energyBtn = h('button.pill.tiny.energy-pill', {
     title: 'Live Energy & Wattage Monitor + Monthly Cost Estimator',
     onclick: () => openSheet({ kind: 'energy' }),
   }, icon('zap', 12), '0W');
 
   const schedulesBtn = h('button.pill.tiny', {
-    title: 'Manage automated light schedules, Circadian sun mode, Sleep timers & Away mode',
+    title: 'Manage automated light schedules, Sunrise Alarm, Pomodoro Focus, Circadian & Away mode',
     onclick: () => openSheet({ kind: 'schedules' }),
   }, icon('clock', 12), 'Schedules');
+
+  const activityBtn = h('button.pill.tiny', {
+    title: 'Activity Timeline, Device Health & Stream Deck / iOS Webhook Shortcuts',
+    onclick: () => openSheet({ kind: 'activity' }),
+  }, icon('activity', 12), 'Log & Hooks');
+
+  const surfaceHubBtn = h('button.pill.tiny', {
+    title: 'Surface 7 Living Room Hub: Standby Clock Screensaver, Wake Lock, Thermal Eco FPS, Tactile Audio & Kiosk Shortcut',
+    onclick: () => openSheet({ kind: 'surfaceHub' }),
+  }, icon('laptop', 12), 'Surface Hub');
+
+  const batteryPill = h('button.pill.tiny.battery-pill', {
+    hidden: true,
+    title: 'Surface Battery & Charger Status (tap to open Surface Hub settings)',
+    onclick: () => openSheet({ kind: 'surfaceHub' }),
+  }, icon('batteryCharging', 12), '100%');
 
   const qrBtn = h('button.pill.tiny', {
     title: 'Scan QR code to open on your phone over Wi-Fi',
@@ -271,33 +367,63 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
     const lMode = world?.getLightingMode?.() || localStorage.getItem('house-control:lighting') || 'night';
     skyBtn.textContent = lMode === 'night' ? 'Sky: Night' : lMode === 'day' ? 'Sky: Day' : 'Sky: Auto';
     const wMode = world?.getWeatherMode?.() || localStorage.getItem('house-control:weather') || 'clear';
-    weatherBtn.replaceChildren(icon('rain', 12), `Weather: ${wMode[0].toUpperCase()}${wMode.slice(1)}`);
-    studioBtn.classList.toggle('active', screenSync.active || audioReactive.active);
+    weatherBtn.classList.toggle('active', weatherAuto);
+    weatherBtn.replaceChildren(
+      icon('rain', 12),
+      weatherAuto && liveWeatherInfo
+        ? `Live: ${liveWeatherInfo.tempF}°F ${liveWeatherInfo.condition}`
+        : `Weather: ${wMode[0].toUpperCase()}${wMode.slice(1)}`
+    );
+    const hMode = world?.getHeatmapMode?.() || 'off';
+    heatmapBtn.classList.toggle('active', hMode !== 'off');
+    heatmapBtn.replaceChildren(icon('thermo', 12), hMode === 'off' ? 'Heatmap' : hMode === 'temp' ? 'Map: °C' : 'Map: Watts');
+    camTourBtn.classList.toggle('active', Boolean(world?.getAutoOrbit?.()));
+    const studioActive = screenSync.active || audioReactive.active || lightShow.active;
+    studioBtn.classList.toggle('active', studioActive);
     studioBtn.replaceChildren(
-      icon(audioReactive.active ? 'music' : 'screen', 12),
-      screenSync.active ? 'Ambilight: LIVE' : audioReactive.active ? 'Beats: LIVE' : 'Ambilight & Beats'
+      icon(audioReactive.active ? 'music' : lightShow.active ? 'flame' : 'screen', 12),
+      screenSync.active ? 'Ambilight: LIVE' : audioReactive.active ? 'Beats: LIVE' : lightShow.active ? `FX: ${lightShow.activeId}` : 'Studio FX'
     );
     const activeW = computeActiveWatts();
+    energyBtn.classList.toggle('active', activeW > 0);
     energyBtn.replaceChildren(icon('zap', 12), `${activeW}W`);
+    kioskBtn.classList.toggle('on', wakeKiosk.isFullscreen);
+    kioskBtn.replaceChildren(icon(wakeKiosk.isFullscreen ? 'minimize' : 'maximize', 15));
+    guestLockBtn.classList.toggle('on', guestPinLock.locked);
+    guestLockBtn.replaceChildren(icon(guestPinLock.locked ? 'lock' : 'unlock', 15));
+    surfaceHubBtn.classList.toggle('active', wakeKiosk.wakeActive || wakeKiosk.isFullscreen);
+    walkTouchPad.sync();
   }
 
   const navBar = h('div.panel-nav-toggles',
+    surfaceHubBtn,
+    batteryPill,
     toggleScenesBtn,
     toggleRoomsBtn,
     walkBtn,
     cutawayBtn,
     skyBtn,
     weatherBtn,
+    heatmapBtn,
+    camTourBtn,
     studioBtn,
     energyBtn,
     schedulesBtn,
+    activityBtn,
     qrBtn,
     syncBtn,
-    h('button.pill.tiny', { onclick: () => { location.href = `${location.pathname}?mode=editor`; } }, '2D Plan ↗'),
+    h('button.pill.tiny', { onclick: () => guestPinLock.guard(() => { location.href = `${location.pathname}?mode=editor`; }) }, '2D Plan ↗'),
     toggleDrawerBtn);
+
+  const livingDock = createLivingRoomDock({
+    config,
+    store,
+    toast: (msg, badge) => toast(msg, badge),
+  });
 
   const panel = h('section.panel',
     navBar,
+    livingDock.el,
     scenes, rooms,
     h('div.list-head', listTitle,
       collapseAllBtn,
@@ -314,10 +440,58 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
     h('header.top',
       h('div.home', h('div.home-badge', icon('home', 17)),
         h('div', h('div.home-name', config.name), homeSub)),
-      aiBadge, cmdBtn, voiceBtn, editPlanBtn, gear, power),
+      aiBadge, cmdBtn, voiceBtn, kioskBtn, guestLockBtn, editPlanBtn, gear, power),
     tooltip, panel, sheet, toastEl);
   const card = h('div.card.booting', h('div.notch'), clip);
+  if (typeof window !== 'undefined' && (window.matchMedia?.('(pointer: coarse)')?.matches || new URLSearchParams(location.search).get('surface') === '1')) {
+    card.classList.add('surface-touch');
+  }
   root.replaceChildren(card);
+
+  const wakeKiosk = createWakeAndKioskManager({
+    onChange: () => { updateEnvButtons(); sheetView?.update?.(); },
+    toast: (msg) => toast(msg, 'Surface Hub'),
+  });
+
+  const batteryInfo = createBatteryMonitor({
+    toast: (msg, badge) => toast(msg, badge),
+    onUpdate: (bat) => {
+      if (!bat.supported) return;
+      batteryPill.hidden = false;
+      const pct = Math.round(bat.level * 100);
+      batteryPill.classList.toggle('low', !bat.charging && pct <= 25);
+      batteryPill.replaceChildren(
+        icon(bat.charging ? 'batteryCharging' : 'battery', 12),
+        `${pct}%${bat.charging ? ' ⚡' : ''}`
+      );
+    },
+  });
+
+  const standbySaver = createStandbyScreensaver({
+    card: clip,
+    getWorld: () => world,
+    config,
+    state,
+    getWeather: () => liveWeatherInfo,
+    getBattery: () => batteryInfo,
+    computeWatts: computeActiveWatts,
+  });
+
+  const walkTouchPad = createWalkthroughTouchPad({
+    card: clip,
+    getWorld: () => world,
+    onExit: () => {
+      world?.setWalkthrough?.(false);
+      updateEnvButtons();
+      toast('Exited First-Person Walkthrough');
+    },
+  });
+
+  const guestPinLock = createGuestPinLock({
+    card: clip,
+    toast: (msg) => toast(msg, 'Guest Lock'),
+    onChange: () => { updateEnvButtons(); sheetView?.update?.(); },
+  });
 
   /* ---------- scenes + Custom Scene Builder ---------- */
 
@@ -531,6 +705,65 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
       collapseAllBtn.style.display = ui.room === 'all' ? '' : 'none';
     }
 
+    // Per-Room Master Brightness, Kelvin & Multi-Light Gradient Bar when viewing a specific room
+    if (ui.room !== 'all') {
+      const roomLights = config.lights.filter((l) => l.room === ui.room);
+      if (roomLights.length > 0) {
+        const activeLights = roomLights.filter((l) => state.lights[l.id]?.on);
+        const avgBri = activeLights.length
+          ? Math.round((activeLights.reduce((acc, l) => acc + (state.lights[l.id]?.brightness ?? 0.8), 0) / activeLights.length) * 100)
+          : 75;
+        const briValEl = h('b', `${avgBri}%`);
+        const masterBriInput = h('input.room-master-range', {
+          type: 'range',
+          min: '5',
+          max: '100',
+          value: String(avgBri),
+          oninput: (ev) => {
+            const pct = Number(ev.target.value);
+            briValEl.textContent = `${pct}%`;
+            for (const l of roomLights) {
+              store.setLight(l.id, { on: true, brightness: pct / 100 });
+            }
+          },
+        });
+        const kelvinChips = [
+          { label: '2700K Warm', k: 2700 },
+          { label: '4000K Neutral', k: 4000 },
+          { label: '5500K Day', k: 5500 },
+        ].map((item) => h('button.pill.tiny', {
+          onclick: () => {
+            haptic('light');
+            for (const l of roomLights) {
+              store.setLight(l.id, { on: true, temp: item.k, color: null });
+            }
+            toast(`${roomName.get(ui.room)}: ${item.label}`);
+          },
+        }, item.label));
+
+        const themeChips = MULTI_LIGHT_THEMES.map((th) => {
+          const grad = `linear-gradient(90deg, ${th.colors.join(', ')})`;
+          return h('button.pill.tiny.theme-chip', {
+            title: `Spread "${th.name}" across ${roomLights.length} lights`,
+            onclick: () => {
+              haptic('medium');
+              const count = applyMultiLightTheme(th.id, { config, store, scopeRoom: ui.room });
+              toast(`Applied "${th.name}" across ${count} light${count === 1 ? '' : 's'}`);
+            },
+          }, h('span.theme-dot', { style: { background: grad } }), th.name);
+        });
+
+        nodes.push(h('div.room-master-bar',
+          h('div.room-master-top',
+            h('span', icon('bright', 13), ' Room Master Brightness'),
+            briValEl),
+          masterBriInput,
+          h('div.room-master-row', ...kelvinChips),
+          h('div.room-master-row.themes-scroll', ...themeChips)
+        ));
+      }
+    }
+
     // Touch-first Quick Favorites bar at the top when viewing Whole Home
     if (ui.room === 'all' && favorites.size > 0) {
       const favList = [...favorites].map((id) => favTiles.get(id)).filter(Boolean);
@@ -597,6 +830,9 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
     else if (target.kind === 'phoneQr') sheetView = phoneQrSheet();
     else if (target.kind === 'studio') sheetView = studioSyncSheet();
     else if (target.kind === 'energy') sheetView = energySheet();
+    else if (target.kind === 'cameraTour') sheetView = cameraTourSheet();
+    else if (target.kind === 'activity') sheetView = activitySheet();
+    else if (target.kind === 'surfaceHub') sheetView = surfaceHubSheet();
     else if (target.kind === 'commandPalette') sheetView = commandPaletteSheet();
     if (!sheetView) return;
     sheet.replaceChildren(...sheetView.nodes);
@@ -705,7 +941,7 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
             }, 'Update'),
             config.scenes.length > 1 ? h('button.pill.tiny.danger', {
               title: `Delete "${sc.name}"`,
-              onclick: async () => {
+              onclick: () => guestPinLock.guard(async () => {
                 try {
                   await call('scene.delete', { id: sc.id });
                   const idx = config.scenes.findIndex((x) => x.id === sc.id);
@@ -716,7 +952,7 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
                 } catch (e) {
                   toast(`Could not delete scene: ${e.message}`);
                 }
-              },
+              }, 'Enter PIN to delete scene'),
             }, icon('trash', 12)) : null
           )
         ))
@@ -797,8 +1033,71 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
         const list = data?.schedules || [];
         const sun = data?.sun || { sunrise: '06:30', sunset: '18:45' };
         const modes = data?.modes || { circadian: false, awayMode: false };
+        const sunriseAlarm = modes.sunriseAlarm || { enabled: false, time: '07:00', durationMin: 20, room: 'bedroom' };
         const sleepTimers = data?.sleepTimers || [];
         const curKelvin = computeCircadianKelvin();
+
+        // 0. Gentle Sunrise Wake-Up Alarm + Pomodoro Focus Timer
+        const srTimeIn = h('input.sheet-input', { type: 'time', value: sunriseAlarm.time || '07:00', style: { maxWidth: '115px' } });
+        const srRoomSel = h('select.sheet-select',
+          h('option', { value: 'all', selected: sunriseAlarm.room === 'all' }, 'All Rooms'),
+          ...roomsWithLights.map((r) => h('option', { value: r.id, selected: sunriseAlarm.room === r.id }, r.name)));
+        const saveSunrise = async (enabledPatch = sunriseAlarm.enabled) => {
+          const next = {
+            enabled: Boolean(enabledPatch),
+            time: srTimeIn.value || '07:00',
+            durationMin: 20,
+            room: srRoomSel.value,
+          };
+          await call('schedules.setModes', { sunriseAlarm: next });
+          toast(next.enabled ? `Sunrise Alarm set for ${next.time} (${next.room})` : 'Sunrise Alarm paused');
+          loadAndRender();
+        };
+        srTimeIn.addEventListener('change', () => saveSunrise(sunriseAlarm.enabled));
+        srRoomSel.addEventListener('change', () => saveSunrise(sunriseAlarm.enabled));
+
+        const sunriseCard = h(`div.smart-mode-card${sunriseAlarm.enabled ? '.on' : ''}`,
+          h('div.smart-mode-head',
+            icon('alarm', 16),
+            h('div',
+              h('b', 'Gentle Sunrise Wake-Up Simulator'),
+              h('span', 'Ramps 5% 2200K ember → 100% 5000K daylight over 20m before alarm')),
+            h(`button.pill.tiny${sunriseAlarm.enabled ? '.active' : ''}`, {
+              onclick: () => saveSunrise(!sunriseAlarm.enabled),
+            }, sunriseAlarm.enabled ? 'Active' : 'Enable'),
+            h('button.pill.tiny', {
+              title: 'Preview sunrise light ramp right now',
+              onclick: async () => {
+                await call('schedules.sunriseTest', { room: srRoomSel.value, progress: 0.65 });
+                toast(`Previewed Sunrise Warmth in ${srRoomSel.options[srRoomSel.selectedIndex].text}`);
+              },
+            }, 'Test Ramp')),
+          h('div.sched-form-row', { style: { marginTop: '8px' } }, srTimeIn, srRoomSel)
+        );
+
+        const focusStatusEl = h('span', focusTimer.active
+          ? `${focusTimer.phase.toUpperCase()} · ${Math.floor(focusTimer.remainingSec / 60)}m ${focusTimer.remainingSec % 60}s left`
+          : 'Flashes 5200K Daylight for work blocks & Emerald Green for breaks');
+        const focusCard = h(`div.smart-mode-card${focusTimer.active ? '.on' : ''}`,
+          h('div.smart-mode-head',
+            icon('timer', 16),
+            h('div', h('b', 'Pomodoro / Deep-Work Focus Timer'), focusStatusEl),
+            h('button.pill.tiny', {
+              onclick: () => {
+                focusTimer.start({ workMin: 25, breakMin: 5, scopeRoom: ui.room });
+                loadAndRender();
+              },
+            }, '25m / 5m'),
+            h('button.pill.tiny', {
+              onclick: () => {
+                focusTimer.start({ workMin: 50, breakMin: 10, scopeRoom: ui.room });
+                loadAndRender();
+              },
+            }, '50m / 10m'),
+            focusTimer.active ? h('button.pill.tiny.danger', {
+              onclick: () => { focusTimer.stop(); loadAndRender(); },
+            }, 'Stop') : null)
+        );
 
         // 1. Smart Automation Modes (Circadian Rhythm + Vacation/Away Presence + Windows Startup)
         const modesRow = h('div.smart-modes-grid',
@@ -923,6 +1222,9 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
           h('div.sun-banner',
             h('span', icon('sun', 15), ` Sunrise: ${sun.sunrise}`),
             h('span', icon('moon', 15), ` Sunset: ${sun.sunset}`)),
+          h('div.field-label', h('span', 'Sunrise Wake-Up & Pomodoro Focus')),
+          sunriseCard,
+          focusCard,
           h('div.field-label', h('span', 'Smart Automation & System Modes')),
           modesRow,
           h('div.field-label', h('span', 'Countdown Sleep Timer (Gradual Dim to Off)')),
@@ -956,10 +1258,10 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
                 }, icon('play', 11), 'Run'),
                 h('button.pill.tiny.danger', {
                   title: 'Delete schedule',
-                  onclick: async () => {
+                  onclick: () => guestPinLock.guard(async () => {
                     await call('schedules.delete', { id: s.id });
                     loadAndRender();
-                  },
+                  }, 'Enter PIN to delete schedule'),
                 }, icon('trash', 12))));
           }),
           h('div.field-label', h('span', 'Create New Schedule')),
@@ -1038,6 +1340,9 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
       },
     }, icon('screen', 14), 'Sync System / Tab Audio');
 
+    const showButtonsWrap = h('div.dynamic-effects-row');
+    const themeButtonsWrap = h('div.dynamic-effects-row');
+
     function renderStudioState() {
       swatchEl.style.background = screenSync.color;
       screenStatus.textContent = screenSync.active ? `Live color: ${screenSync.color.toUpperCase()}` : 'Idle — click Start to pick a monitor or window';
@@ -1049,13 +1354,52 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
       eqBass.style.height = `${Math.max(8, Math.round(lv.bass * 100))}%`;
       eqMid.style.height = `${Math.max(8, Math.round(lv.mid * 100))}%`;
       eqHigh.style.height = `${Math.max(8, Math.round(lv.high * 100))}%`;
+
+      themeButtonsWrap.replaceChildren(...MULTI_LIGHT_THEMES.map((th) => {
+        const grad = `linear-gradient(90deg, ${th.colors.join(', ')})`;
+        return h('button.pill.tiny.theme-chip', {
+          onclick: () => {
+            haptic('medium');
+            const count = applyMultiLightTheme(th.id, { config, store, scopeRoom: scopeSel.value });
+            toast(`Applied "${th.name}" across ${count} lights`);
+          },
+        }, h('span.theme-dot', { style: { background: grad } }), th.name);
+      }));
+
+      showButtonsWrap.replaceChildren(
+        ...LIGHT_SHOW_PRESETS.map((pr) =>
+          h(`button.pill.tiny${lightShow.activeId === pr.id ? '.active' : ''}`, {
+            onclick: () => {
+              haptic('medium');
+              if (lightShow.activeId === pr.id) {
+                lightShow.stop();
+                toast(`Stopped ${pr.name}`);
+              } else {
+                lightShow.start(pr.id, scopeSel.value);
+                toast(`Started Light Show: ${pr.name}`);
+              }
+              renderStudioState();
+              updateEnvButtons();
+            },
+          }, icon(pr.icon || 'sparkles', 12), pr.name)
+        ),
+        lightShow.active ? h('button.pill.tiny.danger', {
+          onclick: () => { lightShow.stop(); renderStudioState(); updateEnvButtons(); },
+        }, 'Stop FX') : null
+      );
     }
+
+    renderStudioState();
 
     return {
       nodes: [
-        sheetHead('Ambilight & Music Studio', sub),
+        sheetHead('Ambilight, Themes & FX Studio', sub),
         h('div.sheet-body-scroll',
           scopeSel,
+          h('div.field-label', h('span', 'Multi-Light Color Gradient Themes')),
+          themeButtonsWrap,
+          h('div.field-label', h('span', 'Live Animated Light Shows (Procedural FX)')),
+          showButtonsWrap,
           h('div.field-label', h('span', 'PC Screen / Movie "Ambilight" Sync')),
           h('div.studio-card',
             swatchEl,
@@ -1073,6 +1417,318 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
         ),
       ],
       update: renderStudioState,
+    };
+  }
+
+  /* ---------- 3D Camera Bookmarks, Auto-Orbit & Interactive Props Sheet ---------- */
+
+  function cameraTourSheet() {
+    const sub = h('div.sheet-sub', 'Cinematic 360° auto-orbit, preset room views & interactive 3D furniture');
+    const body = h('div.sheet-body-scroll');
+
+    function loadBookmarks() {
+      try { return JSON.parse(localStorage.getItem('house.cameraBookmarks') || '[]'); } catch { return []; }
+    }
+    function saveBookmarks(list) {
+      localStorage.setItem('house.cameraBookmarks', JSON.stringify(list));
+    }
+
+    function renderTour() {
+      const orbitOn = Boolean(world?.getAutoOrbit?.());
+      const hm = world?.getHeatmapMode?.() || 'off';
+      const bookmarks = loadBookmarks();
+
+      const orbitBtn = h(`button.pill.primary-pill${orbitOn ? '.active' : ''}`, {
+        onclick: () => {
+          const next = !world?.getAutoOrbit?.();
+          world?.setAutoOrbit?.(next);
+          toast(next ? '3D Cinematic Auto-Orbit ON' : 'Auto-Orbit paused');
+          updateEnvButtons();
+          renderTour();
+        },
+      }, icon('compass', 15), orbitOn ? 'Stop 360° Cinematic Auto-Orbit' : 'Start 360° Cinematic Auto-Orbit');
+
+      const presetRooms = [
+        { id: 'all', label: 'Whole Home Dollhouse' },
+        ...config.rooms.map((r) => ({ id: r.id, label: r.name })),
+      ];
+
+      const saveBkName = h('input.sheet-input', { type: 'text', placeholder: 'Bookmark name (e.g. Kitchen Island Angle)' });
+      const saveBkBtn = h('button.pill', {
+        onclick: () => {
+          const label = saveBkName.value.trim() || `View ${bookmarks.length + 1}`;
+          const next = [...bookmarks, { id: `bk-${Date.now()}`, label, room: ui.room, time: world?.getTimeOfDay?.() ?? 20.5 }];
+          saveBookmarks(next);
+          toast(`Saved camera bookmark "${label}"`);
+          renderTour();
+        },
+      }, icon('plus', 14), 'Save Current View');
+
+      body.replaceChildren(
+        orbitBtn,
+        h('div.field-label', h('span', '3D Floor Heatmap Overlay')),
+        h('div.scene-icon-picker',
+          ...[
+            { id: 'off', label: 'Heatmap Off' },
+            { id: 'temp', label: 'Temperature (°C)' },
+            { id: 'watts', label: 'Power Draw (Watts)' },
+          ].map((m) => h(`button.pill.tiny${hm === m.id ? '.active' : ''}`, {
+            onclick: () => {
+              world?.setHeatmapMode?.(m.id);
+              updateEnvButtons();
+              renderTour();
+            },
+          }, icon('thermo', 12), m.label))),
+        h('div.field-label', h('span', 'Jump to Room Camera')),
+        h('div.dynamic-effects-row',
+          ...presetRooms.map((pr) => h(`button.pill.tiny${ui.room === pr.id ? '.active' : ''}`, {
+            onclick: () => { selectRoom(pr.id); renderTour(); },
+          }, icon('home', 12), pr.label))),
+        h('div.field-label', h('span', 'Saved Camera Bookmarks')),
+        h('div.sched-form-row', saveBkName, saveBkBtn),
+        ...bookmarks.map((bk) => h('div.sched-row',
+          h('div.sched-main', h('b', bk.label), h('span', `Room: ${roomName.get(bk.room) || 'Whole Home'} · ${bk.time.toFixed(1)}h`)),
+          h('div.sched-actions',
+            h('button.pill.tiny', {
+              onclick: () => {
+                selectRoom(bk.room || 'all');
+                if (typeof bk.time === 'number') world?.setTimeOfDay?.(bk.time);
+                updateEnvButtons();
+                toast(`Restored view "${bk.label}"`);
+              },
+            }, 'Go'),
+            h('button.pill.tiny.danger', {
+              onclick: () => {
+                saveBookmarks(bookmarks.filter((x) => x.id !== bk.id));
+                renderTour();
+              },
+            }, icon('trash', 12))))),
+        h('div.sheet-note',
+          h('b', 'Interactive 3D Appliances: '),
+          'Click any TV, Fireplace/Chimney, or Bathtub directly in the 3D scene to toggle glowing screens, flickering fireplace embers, and running water.')
+      );
+    }
+
+    renderTour();
+    return {
+      nodes: [sheetHead('3D Camera Tour & Heatmap', sub), body],
+      update: renderTour,
+    };
+  }
+
+  /* ---------- Activity Log & One-Tap Webhook URLs Sheet ---------- */
+
+  function activitySheet() {
+    const sub = h('div.sheet-sub', 'Live event timeline, hardware health & Stream Deck / iOS Shortcuts URLs');
+    const body = h('div.sheet-body-scroll', h('div.sheet-note', 'Loading activity…'));
+    const lanIp = window.__HOUSE_BOOT__?.lan?.ip || location.hostname;
+    const baseApi = `http://${lanIp}:5200`;
+
+    async function loadActivity() {
+      try {
+        const res = await call('system.activity');
+        const log = res?.log || [];
+        const hw = res?.hardware || {};
+
+        const quickHooks = [
+          { label: 'All Lights ON', url: `${baseApi}/api/quick/all/on` },
+          { label: 'All Lights OFF', url: `${baseApi}/api/quick/all/off` },
+          ...config.scenes.slice(0, 5).map((s) => ({
+            label: `Scene: ${s.name}`,
+            url: `${baseApi}/api/quick/scene/${encodeURIComponent(s.id)}`,
+          })),
+          ...roomsWithLights.slice(0, 4).map((r) => ({
+            label: `Toggle ${r.name}`,
+            url: `${baseApi}/api/quick/room/${encodeURIComponent(r.id)}/toggle`,
+          })),
+        ];
+
+        body.replaceChildren(
+          h('div.energy-kpi-row',
+            h('div.energy-kpi', h('small', 'Govee Bulbs'), h('b', `${hw.goveeCount ?? 0}`)),
+            h('div.energy-kpi', h('small', 'Hue Lights'), h('b', `${hw.hueCount ?? 0}`)),
+            h('div.energy-kpi', h('small', 'Live Clients'), h('b', `${hw.wsClients ?? 1}`))),
+          h('div.field-label', h('span', 'One-Tap Webhook URLs (Stream Deck / iOS Shortcuts / Hotkeys)')),
+          ...quickHooks.map((hk) => h('div.sched-row',
+            h('div.sched-main', h('b', hk.label), h('span.webhook-url', hk.url)),
+            h('div.sched-actions',
+              h('button.pill.tiny', {
+                onclick: () => {
+                  navigator.clipboard?.writeText(hk.url).catch(() => {});
+                  toast(`Copied ${hk.label} URL`);
+                },
+              }, icon('copy', 12), 'Copy'),
+              h('button.pill.tiny', {
+                onclick: async () => {
+                  await fetch(hk.url).catch(() => {});
+                  toast(`Triggered ${hk.label}`);
+                  setTimeout(loadActivity, 250);
+                },
+              }, icon('play', 11), 'Test')))),
+          h('div.field-label',
+            h('span', `Recent Activity Log (${log.length})`),
+            h('button.pill.tiny', { onclick: loadActivity }, 'Refresh')),
+          ...(log.length ? log.slice(0, 35).map((item) => {
+            const t = new Date(item.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            return h('div.activity-row',
+              h('span.activity-time', t),
+              h('span.activity-kind', item.kind),
+              h('span.activity-msg', item.message));
+          }) : [h('div.sheet-note', 'No events recorded yet — toggle a light or scene to see live events.')])
+        );
+      } catch (e) {
+        body.replaceChildren(h('div.sheet-note', `Could not load activity: ${e.message}`));
+      }
+    }
+
+    loadActivity();
+    return {
+      nodes: [sheetHead('Activity Log & Quick Webhooks', sub), body],
+      update() {},
+    };
+  }
+
+  /* ---------- Surface 7 Living Room Hub & Kiosk Settings Sheet ---------- */
+
+  function surfaceHubSheet() {
+    const sub = h('div.sheet-sub', 'Fullscreen Kiosk, Wake Lock, Standby Clock Screensaver, Eco FPS & PIN Lock');
+    const body = h('div.sheet-body-scroll');
+
+    function renderHub() {
+      const isFs = wakeKiosk.isFullscreen;
+      const wakeOn = wakeKiosk.wakeEnabled;
+      const ecoOn = Boolean(world?.getEcoMode?.() ?? true);
+      const soundOn = isTactileSoundEnabled();
+      const touchSizing = card.classList.contains('surface-touch');
+      const pinIn = h('input.sheet-input', {
+        type: 'text',
+        maxLength: 4,
+        placeholder: '4-digit PIN (e.g. 1234)',
+        value: guestPinLock.pin,
+        style: { maxWidth: '130px' },
+      });
+
+      const idleOpts = [
+        { min: 0, label: 'Off' },
+        { min: 1, label: '1 min' },
+        { min: 3, label: '3 min' },
+        { min: 5, label: '5 min' },
+        { min: 10, label: '10 min' },
+      ];
+
+      body.replaceChildren(
+        h('button.pill.primary-pill', {
+          onclick: () => { wakeKiosk.toggleFullscreen(); renderHub(); },
+        }, icon(isFs ? 'minimize' : 'maximize', 15), isFs ? 'Exit Fullscreen Kiosk Mode' : 'Enter Surface Fullscreen Kiosk Mode'),
+
+        h('div.smart-modes-grid',
+          h(`div.smart-mode-card${wakeOn ? '.on' : ''}`,
+            h('div.smart-mode-head',
+              icon('sun', 16),
+              h('div',
+                h('b', 'Screen Wake Lock (Keep Surface Awake)'),
+                h('span', wakeKiosk.wakeActive ? 'Active — Windows display will not dim or sleep' : 'Prevents tablet screen from turning off while docked')),
+              h(`button.pill.tiny${wakeOn ? '.active' : ''}`, {
+                onclick: async () => { await wakeKiosk.setWakeEnabled(!wakeOn); renderHub(); },
+              }, wakeOn ? 'Active' : 'Enable'))),
+
+          h(`div.smart-mode-card${ecoOn ? '.on' : ''}`,
+            h('div.smart-mode-head',
+              icon('leaf', 16),
+              h('div',
+                h('b', 'Surface Thermal / Eco 3D Governor'),
+                h('span', '60 FPS while touching screen · steps down to cool 18 FPS when idle')),
+              h(`button.pill.tiny${ecoOn ? '.active' : ''}`, {
+                onclick: () => {
+                  world?.setEcoMode?.(!ecoOn);
+                  toast(!ecoOn ? 'Surface Eco Thermal Mode ON (18 FPS idle)' : 'Full 60 FPS continuous mode');
+                  renderHub();
+                },
+              }, ecoOn ? 'Eco ON' : '60 FPS'))),
+
+          h(`div.smart-mode-card${soundOn ? '.on' : ''}`,
+            h('div.smart-mode-head',
+              icon(soundOn ? 'music' : 'mute', 16),
+              h('div',
+                h('b', 'Web-Audio Tactile Glass Clicks & Chimes'),
+                h('span', 'Audible tactile feedback when tapping tiles or dragging sliders')),
+              h(`button.pill.tiny${soundOn ? '.active' : ''}`, {
+                onclick: () => {
+                  setTactileSoundEnabled(!soundOn);
+                  if (!soundOn) haptic('medium');
+                  renderHub();
+                },
+              }, soundOn ? 'Sound ON' : 'Muted'))),
+
+          h(`div.smart-mode-card${touchSizing ? '.on' : ''}`,
+            h('div.smart-mode-head',
+              icon('laptop', 16),
+              h('div',
+                h('b', 'Surface Large Touch Targets Mode'),
+                h('span', 'Enlarges sliders, pills & favorite stars for finger touch')),
+              h(`button.pill.tiny${touchSizing ? '.active' : ''}`, {
+                onclick: () => {
+                  card.classList.toggle('surface-touch', !touchSizing);
+                  renderHub();
+                },
+              }, touchSizing ? 'Large Touch' : 'Standard')))
+        ),
+
+        h('div.field-label', h('span', 'Ambient Living Room Clock & Weather Screensaver')),
+        h('div.scene-icon-picker',
+          ...idleOpts.map((o) => h(`button.pill.tiny${standbySaver.idleMinutes === o.min ? '.active' : ''}`, {
+            onclick: () => {
+              standbySaver.setIdleMinutes(o.min);
+              toast(o.min ? `Standby Clock Screensaver set to ${o.min} min idle` : 'Standby Screensaver disabled');
+              renderHub();
+            },
+          }, icon('clock', 12), o.label)),
+          h(`button.pill.tiny${standbySaver.nightDim ? '.active' : ''}`, {
+            onclick: () => {
+              standbySaver.setNightDim(!standbySaver.nightDim);
+              renderHub();
+            },
+          }, icon('moon', 12), standbySaver.nightDim ? 'Night Auto-Dim: ON' : 'Night Auto-Dim: OFF'),
+          h('button.pill.tiny', {
+            onclick: () => {
+              closeSheet();
+              standbySaver.startNow();
+            },
+          }, icon('play', 11), 'Preview Standby Clock')),
+
+        h('div.field-label', h('span', 'Guest / Kids Mode 4-Digit PIN Lock')),
+        h('div.sched-row',
+          h('div.sched-main',
+            h('b', guestPinLock.locked ? 'Guest Lock is ACTIVE' : 'Guest Lock is Unlocked'),
+            h('span', 'Locks 2D Floor Plan Editor & settings while keeping lights & scenes open')),
+          h('div.sched-actions',
+            pinIn,
+            h('button.pill.tiny', {
+              onclick: () => guestPinLock.setPin(pinIn.value),
+            }, 'Save PIN'),
+            h(`button.pill.tiny${guestPinLock.locked ? '.active' : ''}`, {
+              onclick: () => guestPinLock.toggleLock(),
+            }, icon(guestPinLock.locked ? 'lock' : 'unlock', 12), guestPinLock.locked ? 'Unlock' : 'Lock Now'))),
+
+        h('div.field-label', h('span', 'Windows Desktop / Surface Kiosk Appliance Shortcut')),
+        h('button.pill.primary-pill', {
+          onclick: async () => {
+            try {
+              const r = await call('system.kioskShortcut');
+              toast(`Created "House Control Surface Kiosk" shortcut on Desktop!`, 'Surface Hub');
+              if (r?.shortcutPath) console.log('Kiosk shortcut:', r.shortcutPath);
+            } catch (e) {
+              toast(`Could not create shortcut: ${e.message}`);
+            }
+          },
+        }, icon('laptop', 15), 'Create "Surface Kiosk" Shortcut on Windows Desktop')
+      );
+    }
+
+    renderHub();
+    return {
+      nodes: [sheetHead('Surface 7 Living Room Hub', sub), body],
+      update: renderHub,
     };
   }
 
@@ -1194,11 +1850,59 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
         },
       },
       {
+        title: '3D Room Heatmap Overlay (Temp °C / Watts)',
+        sub: 'Colorize 3D floors by temperature or power draw',
+        icon: 'thermo',
+        keywords: 'heatmap temperature watts thermal floor 3d overlay',
+        run: () => {
+          const cur = world?.getHeatmapMode?.() || 'off';
+          const next = cur === 'off' ? 'temp' : cur === 'temp' ? 'watts' : 'off';
+          world?.setHeatmapMode?.(next);
+          updateEnvButtons();
+          closeSheet();
+        },
+      },
+      {
+        title: '3D Camera Tour & Bookmarks',
+        sub: 'Start 360° cinematic auto-orbit or jump to saved camera angles',
+        icon: 'compass',
+        keywords: 'camera tour orbit bookmark 360 angle',
+        run: () => { openSheet({ kind: 'cameraTour' }); },
+      },
+      {
+        title: 'Activity Log & Stream Deck Webhooks',
+        sub: 'View live device event timeline & copy 1-tap webhook URLs',
+        icon: 'list',
+        keywords: 'activity log webhooks stream deck shortcuts events history',
+        run: () => { openSheet({ kind: 'activity' }); },
+      },
+      {
+        title: 'Sync Live Outdoor Weather (Open-Meteo)',
+        sub: 'Match 3D sky, rain/snow & outdoor temp to real local weather',
+        icon: 'cloud',
+        keywords: 'weather live sync outdoor rain snow sun',
+        run: () => { syncRealWeather(true); closeSheet(); },
+      },
+      {
+        title: 'Surface 7 Living Room Hub & Kiosk Settings',
+        sub: 'Fullscreen Kiosk, Screen Wake Lock, Standby Clock Screensaver, Eco FPS & PIN Lock',
+        icon: 'laptop',
+        keywords: 'surface tablet kiosk fullscreen wake lock screensaver clock battery pin eco',
+        run: () => { openSheet({ kind: 'surfaceHub' }); },
+      },
+      {
+        title: 'Launch Ambient Living Room Clock Screensaver',
+        sub: 'Show floating clock, date, outdoor weather & active wattage over slow 3D orbit',
+        icon: 'clock',
+        keywords: 'screensaver standby clock night mode surface',
+        run: () => { closeSheet(); standbySaver.startNow(); },
+      },
+      {
         title: 'Open 2D Floor Plan & Furniture Editor',
-        sub: 'Edit rooms, wall colors, furniture & blueprint underlay',
+        sub: 'Edit rooms, wall colors, furniture, tape measure & blueprint underlay',
         icon: 'edit',
-        keywords: 'edit editor floor plan blueprint walls',
-        run: () => { location.href = '/?edit=1'; },
+        keywords: 'edit editor floor plan blueprint walls measure area',
+        run: () => guestPinLock.guard(() => { location.href = '/?edit=1'; }),
       },
     ];
 

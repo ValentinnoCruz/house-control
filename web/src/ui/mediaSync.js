@@ -354,7 +354,251 @@ export function createAudioReactive({ getTargetLightIds, store, onUpdate }) {
 
   return {
     get active() { return Boolean(timer); },
+    get levels() { return { bass: 0.2, mid: 0.2, high: 0.2 }; },
+    setScope() {},
     start,
     stop,
   };
 }
+
+/* ---------- 4. Room-Wide Multi-Light Color Themes & Gradient Spread ---------- */
+
+export const MULTI_LIGHT_THEMES = [
+  {
+    id: 'cyberpunk',
+    name: 'Cyberpunk Neon',
+    colors: ['#ff2a85', '#00f0ff', '#7b2cbf', '#ffbe0b'],
+    kelvins: [4200, 5500],
+  },
+  {
+    id: 'sunset',
+    name: 'Sunset Horizon',
+    colors: ['#ff4d4d', '#ff9e00', '#ff007f', '#7209b7'],
+    kelvins: [2400, 2800],
+  },
+  {
+    id: 'aurora',
+    name: 'Aurora Borealis',
+    colors: ['#00f5d4', '#00bbf9', '#9b5de5', '#38b000'],
+    kelvins: [4800, 5600],
+  },
+  {
+    id: 'ocean',
+    name: 'Ocean Reef',
+    colors: ['#0077b6', '#00b4d8', '#48cae4', '#56cfe1'],
+    kelvins: [5000, 6000],
+  },
+  {
+    id: 'fireplace',
+    name: 'Cozy Hearth',
+    colors: ['#ff5400', '#ff8500', '#ffaa00', '#e01e37'],
+    kelvins: [2200, 2500],
+  },
+  {
+    id: 'cinema',
+    name: 'Cinema Lounge',
+    colors: ['#3a0ca3', '#4361ee', '#f72585', '#ff9f1c'],
+    kelvins: [2400, 2700],
+  },
+  {
+    id: 'holiday',
+    name: 'Festive Gold & Ruby',
+    colors: ['#d90429', '#ffb703', '#2b9348', '#ff8fa3'],
+    kelvins: [2600, 3000],
+  },
+];
+
+export function applyMultiLightTheme(themeId, roomScope = 'all', { config, store }) {
+  const theme = MULTI_LIGHT_THEMES.find((t) => t.id === themeId) || MULTI_LIGHT_THEMES[0];
+  const lights = config.lights.filter((l) => roomScope === 'all' || l.room === roomScope);
+  let count = 0;
+  lights.forEach((l, idx) => {
+    const patch = { on: true };
+    if (l.capabilities.includes('brightness')) {
+      patch.brightness = theme.id === 'cinema' ? 0.45 : 0.85;
+    }
+    if (l.capabilities.includes('color')) {
+      patch.color = theme.colors[idx % theme.colors.length];
+    } else if (l.capabilities.includes('temp')) {
+      patch.temp = theme.kelvins[idx % theme.kelvins.length] || 2800;
+      patch.color = null;
+    }
+    store.setLight(l.id, patch);
+    count++;
+  });
+  return { theme, count };
+}
+
+/* ---------- 5. Live Animated Light Shows Engine ---------- */
+
+export const LIGHT_SHOW_PRESETS = [
+  { id: 'candle', name: 'Candle Flicker', sub: 'Warm organic amber flicker' },
+  { id: 'fireplace', name: 'Fireplace Embers', sub: 'Deep crimson & glowing orange embers' },
+  { id: 'aurora', name: 'Aurora Wave', sub: 'Drifting emerald, cyan & violet ribbons' },
+  { id: 'storm', name: 'Thunderstorm', sub: 'Deep rain-blue with occasional lightning flashes' },
+  { id: 'party', name: 'Neon Party', sub: 'High-energy multi-fixture color cycling' },
+];
+
+export function createLightShowEngine({ config, store, onUpdate }) {
+  let timer = 0;
+  let activeId = null;
+  let scope = 'all';
+  let tick = 0;
+
+  function stop() {
+    clearInterval(timer);
+    timer = 0;
+    activeId = null;
+    onUpdate?.({ active: false, id: null });
+  }
+
+  function start(showId, nextScope = scope) {
+    stop();
+    activeId = showId;
+    scope = nextScope || 'all';
+    tick = 0;
+
+    const step = () => {
+      tick++;
+      const lights = config.lights.filter((l) => scope === 'all' || l.room === scope);
+      lights.forEach((l, idx) => {
+        const hasColor = l.capabilities.includes('color');
+        const hasTemp = l.capabilities.includes('temp');
+        const hasBright = l.capabilities.includes('brightness');
+        const patch = { on: true };
+
+        if (activeId === 'candle') {
+          const wave = 0.55 + 0.35 * Math.sin(tick * 0.7 + idx * 1.9) + (Math.random() - 0.5) * 0.18;
+          if (hasBright) patch.brightness = Math.max(0.2, Math.min(0.95, wave));
+          if (hasColor) patch.color = idx % 2 === 0 ? '#ff9233' : '#ff771a';
+          else if (hasTemp) { patch.temp = 2200 + (idx % 3) * 100; patch.color = null; }
+        } else if (activeId === 'fireplace') {
+          const emberPalette = ['#ff4800', '#ff6d00', '#ff9e00', '#d00000'];
+          const wave = 0.4 + 0.48 * Math.abs(Math.sin(tick * 0.55 + idx * 1.3));
+          if (hasBright) patch.brightness = Math.max(0.22, Math.min(0.95, wave));
+          if (hasColor) patch.color = emberPalette[(tick + idx) % emberPalette.length];
+          else if (hasTemp) { patch.temp = 2200; patch.color = null; }
+        } else if (activeId === 'aurora') {
+          const auroraPalette = ['#00f5d4', '#00bbf9', '#7209b7', '#38b000', '#4cc9f0'];
+          const wave = 0.5 + 0.38 * Math.sin(tick * 0.4 + idx * 0.9);
+          if (hasBright) patch.brightness = Math.max(0.3, Math.min(0.95, wave));
+          if (hasColor) patch.color = auroraPalette[(tick + idx) % auroraPalette.length];
+          else if (hasTemp) { patch.temp = 4800; patch.color = null; }
+        } else if (activeId === 'storm') {
+          const isFlash = Math.random() < 0.14;
+          if (hasBright) patch.brightness = isFlash ? 1.0 : 0.28 + (idx % 3) * 0.06;
+          if (hasColor) patch.color = isFlash ? '#e0f2fe' : (idx % 2 === 0 ? '#1d4ed8' : '#312e81');
+          else if (hasTemp) { patch.temp = isFlash ? 6500 : 4200; patch.color = null; }
+        } else if (activeId === 'party') {
+          const partyPalette = ['#ff2a85', '#00f0ff', '#ffbe0b', '#8338ec', '#3a86ff', '#06d6a0'];
+          if (hasBright) patch.brightness = 0.65 + ( (tick + idx) % 2 ) * 0.35;
+          if (hasColor) patch.color = partyPalette[(tick + idx * 2) % partyPalette.length];
+          else if (hasTemp) { patch.temp = ((tick + idx) % 2 === 0) ? 2500 : 5800; patch.color = null; }
+        }
+        store.setLight(l.id, patch);
+      });
+      onUpdate?.({ active: true, id: activeId, scope });
+    };
+
+    step();
+    timer = setInterval(step, 950);
+  }
+
+  return {
+    get active() { return Boolean(timer); },
+    get activeId() { return activeId; },
+    get scope() { return scope; },
+    setScope(next) { scope = next || 'all'; },
+    start,
+    stop,
+  };
+}
+
+/* ---------- 6. Pomodoro / Deep-Work Focus Timer with Visual Light Cues ---------- */
+
+export function createFocusTimer({ config, store, onUpdate, onToast }) {
+  let interval = 0;
+  let phase = 'idle'; // 'idle' | 'work' | 'break'
+  let endsAt = 0;
+  let workMins = 25;
+  let breakMins = 5;
+  let scope = 'all';
+
+  function applyPhaseLights(nextPhase) {
+    const lights = config.lights.filter((l) => scope === 'all' || l.room === scope);
+    for (const l of lights) {
+      const patch = { on: true };
+      if (nextPhase === 'work') {
+        if (l.capabilities.includes('brightness')) patch.brightness = 0.92;
+        if (l.capabilities.includes('temp')) { patch.temp = 5200; patch.color = null; }
+        else if (l.capabilities.includes('color')) patch.color = '#f8fafc';
+      } else {
+        // Soothing emerald/teal recharge cue on break
+        if (l.capabilities.includes('brightness')) patch.brightness = 0.55;
+        if (l.capabilities.includes('color')) patch.color = '#10b981';
+        else if (l.capabilities.includes('temp')) { patch.temp = 2700; patch.color = null; }
+      }
+      store.setLight(l.id, patch);
+    }
+  }
+
+  function start({ work = 25, rest = 5, targetScope = 'all' } = {}) {
+    stop();
+    workMins = work;
+    breakMins = rest;
+    scope = targetScope;
+    phase = 'work';
+    endsAt = Date.now() + workMins * 60_000;
+    applyPhaseLights('work');
+    onToast?.(`Focus Work started (${workMins}m · 5200K Daylight)`);
+
+    interval = setInterval(() => {
+      const remSec = Math.max(0, Math.round((endsAt - Date.now()) / 1000));
+      if (remSec <= 0) {
+        if (phase === 'work') {
+          phase = 'break';
+          endsAt = Date.now() + breakMins * 60_000;
+          applyPhaseLights('break');
+          onToast?.(`Focus Break! (${breakMins}m · Relaxing Emerald Glow)`, 'Focus');
+        } else {
+          phase = 'work';
+          endsAt = Date.now() + workMins * 60_000;
+          applyPhaseLights('work');
+          onToast?.(`Back to Deep Work (${workMins}m · 5200K)`, 'Focus');
+        }
+      }
+      onUpdate?.(status());
+    }, 1000);
+    onUpdate?.(status());
+  }
+
+  function stop() {
+    clearInterval(interval);
+    interval = 0;
+    phase = 'idle';
+    endsAt = 0;
+    onUpdate?.(status());
+  }
+
+  function status() {
+    if (phase === 'idle') return { active: false, phase: 'idle', remainingSec: 0, label: 'Idle' };
+    const remSec = Math.max(0, Math.round((endsAt - Date.now()) / 1000));
+    const mm = String(Math.floor(remSec / 60)).padStart(2, '0');
+    const ss = String(remSec % 60).padStart(2, '0');
+    return {
+      active: true,
+      phase,
+      remainingSec: remSec,
+      formatted: `${mm}:${ss}`,
+      label: `${phase === 'work' ? 'Deep Work' : 'Recharge Break'} · ${mm}:${ss}`,
+    };
+  }
+
+  return {
+    get active() { return phase !== 'idle'; },
+    status,
+    start,
+    stop,
+  };
+}
+

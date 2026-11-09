@@ -155,6 +155,8 @@ export async function bootEditor(root) {
   let marquee = null; // { x1, z1, x2, z2 }
   let activeGuides = []; // [{ x1, z1, x2, z2 }]
   let activeRulers = []; // [{ x1, z1, x2, z2, label }]
+  let measureMode = false;
+  let measureLine = null; // { x1, z1, x2, z2 }
   const backupsState = { list: null, busy: false, error: null };
 
   const collapsedGroups = new Set();
@@ -208,14 +210,26 @@ export async function bootEditor(root) {
     zoomLabel.textContent = `${Math.round(zoom2D * 100)}%`;
   }
 
+  const measureBtn = h('button.zoom-btn', {
+    title: 'Interactive Tape Measure tool — click & drag on the 2D plan to measure any distance',
+    onclick: () => {
+      measureMode = !measureMode;
+      if (!measureMode) measureLine = null;
+      measureBtn.classList.toggle('active', measureMode);
+      renderPlan();
+      toast(measureMode ? 'Tape Measure ON — click & drag anywhere on the 2D plan to measure' : 'Tape Measure OFF');
+    },
+  }, icon('ruler', 13), 'Measure');
+
   const zoomBar = h('div.zoom-bar',
     h('button.zoom-btn', { title: 'Zoom out 2D plan (−)', onclick: () => stepZoom2D(1 / 1.25) }, icon('zoomOut', 14)),
     zoomLabel,
     h('button.zoom-btn', { title: 'Zoom in 2D plan (+)', onclick: () => stepZoom2D(1.25) }, icon('zoomIn', 14)),
     h('button.zoom-btn', {
       title: 'Reset 2D view',
-      onclick: () => { zoom2D = 1; pan2D = [0, 0]; updateZoomUI(); renderPlan(); },
-    }, 'Reset'));
+      onclick: () => { zoom2D = 1; pan2D = [0, 0]; measureLine = null; updateZoomUI(); renderPlan(); },
+    }, 'Reset'),
+    measureBtn);
 
   const previewToggle = h('button.chip', {
     title: 'Toggle preview lights',
@@ -899,11 +913,14 @@ export async function bootEditor(root) {
 
     doc.rooms.forEach((r, i) => {
       const [x, z, w, d] = r.rect;
+      const areaM2 = (w * d).toFixed(1);
+      const areaSqFt = Math.round(w * d * 10.7639);
       const wallStroke = r.wallColor ? `stroke:${r.wallColor};stroke-width:0.08` : null;
       const g = sv('g', { class: `p-room${isSel('room', i) ? ' sel' : ''}${r.locked ? ' locked' : ''}`, 'data-kind': 'room', 'data-index': i },
         sv('rect', { x, y: z, width: w, height: d, fill: FLOOR_FILL[r.floor] || FLOOR_FILL.oak, style: wallStroke }),
-        sv('text', { x: x + w / 2, y: z + d / 2 - 0.02, class: 'p-label' }, document.createTextNode(`${r.locked ? '🔒 ' : ''}${r.name || r.id}`)),
-        sv('text', { x: x + w / 2, y: z + d / 2 + 0.3, class: 'p-dim' }, document.createTextNode(`${fix(w)} × ${fix(d)}`)));
+        sv('text', { x: x + w / 2, y: z + d / 2 - 0.08, class: 'p-label' }, document.createTextNode(`${r.locked ? '🔒 ' : ''}${r.name || r.id}`)),
+        sv('text', { x: x + w / 2, y: z + d / 2 + 0.2, class: 'p-dim' }, document.createTextNode(`${fix(w)}×${fix(d)}m (${fmtFeetInches(w)}×${fmtFeetInches(d)})`)),
+        sv('text', { x: x + w / 2, y: z + d / 2 + 0.44, class: 'p-dim p-area' }, document.createTextNode(`${areaSqFt} sq ft · ${areaM2} m²`)));
       kids.push(g);
     });
 
@@ -995,6 +1012,20 @@ export async function bootEditor(root) {
       const mw = Math.abs(marquee.x2 - marquee.x1);
       const md = Math.abs(marquee.z2 - marquee.z1);
       kids.push(sv('rect', { x: mx, y: mz, width: mw, height: md, class: 'p-marquee' }));
+    }
+    if (measureLine) {
+      const dist = Math.hypot(measureLine.x2 - measureLine.x1, measureLine.z2 - measureLine.z1);
+      const mx = (measureLine.x1 + measureLine.x2) / 2;
+      const mz = (measureLine.z1 + measureLine.z2) / 2;
+      const label = `${fmtFeetInches(dist)} (${fix(dist)} m)`;
+      const tagW = Math.max(1.4, label.length * 0.115);
+      kids.push(
+        sv('line', { x1: measureLine.x1, y1: measureLine.z1, x2: measureLine.x2, y2: measureLine.z2, class: 'p-measure-line' }),
+        sv('circle', { cx: measureLine.x1, cy: measureLine.z1, r: 0.09 / Math.sqrt(zoom2D), class: 'p-measure-dot' }),
+        sv('circle', { cx: measureLine.x2, cy: measureLine.z2, r: 0.09 / Math.sqrt(zoom2D), class: 'p-measure-dot' }),
+        sv('rect', { x: mx - tagW / 2, y: mz - 0.19, width: tagW, height: 0.34, rx: 0.07, class: 'p-measure-bg' }),
+        sv('text', { x: mx, y: mz + 0.04, class: 'p-measure-label' }, document.createTextNode(label))
+      );
     }
 
     if (sel.kind === 'room' && doc.rooms[sel.index] && !doc.rooms[sel.index].locked) {
@@ -1147,10 +1178,42 @@ export async function bootEditor(root) {
   }
 
   let drag = null;
+  const planFingers = new Map();
+  let planPinch = null;
+  const planSpread = () => {
+    const [a, b] = [...planFingers.values()];
+    return Math.max(1, Math.hypot(a.x - b.x, a.y - b.y));
+  };
+  const planMidpoint = () => {
+    const [a, b] = [...planFingers.values()];
+    return [(a.x + b.x) / 2, (a.y + b.y) / 2];
+  };
+
   plan.addEventListener('pointerdown', (ev) => {
     const el = ev.target.closest('[data-kind]');
     const kind = el?.dataset.kind;
     plan.setPointerCapture(ev.pointerId);
+    planFingers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+    if (planFingers.size === 2) {
+      planPinch = {
+        spread: planSpread(),
+        zoom: zoom2D,
+        mid: planMidpoint(),
+        panStart: [...pan2D],
+      };
+      drag = null;
+      return;
+    }
+    if (planFingers.size > 2) return;
+
+    // Interactive Tape Measure tool
+    if (measureMode && ev.button === 0 && !spaceDown) {
+      const [sx, sz] = planPoint(ev);
+      measureLine = { x1: fix(round(sx, 0.05)), z1: fix(round(sz, 0.05)), x2: fix(round(sx, 0.05)), z2: fix(round(sz, 0.05)) };
+      drag = { kind: 'measure', start: [sx, sz], moved: false };
+      renderPlan();
+      return;
+    }
 
     // Shift + Drag on empty space starts marquee box multi-selection
     if (ev.shiftKey && (!kind || kind === 'none') && ev.button === 0 && !spaceDown) {
@@ -1249,7 +1312,36 @@ export async function bootEditor(root) {
   });
 
   plan.addEventListener('pointermove', (ev) => {
+    if (planFingers.has(ev.pointerId)) {
+      planFingers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+    }
+    if (planPinch && planFingers.size >= 2) {
+      zoom2D = clamp(planPinch.zoom * (planSpread() / planPinch.spread), 0.5, 6);
+      const mid = planMidpoint();
+      const ctm = plan.getScreenCTM();
+      if (ctm) {
+        pan2D = [
+          planPinch.panStart[0] - (mid[0] - planPinch.mid[0]) / ctm.a,
+          planPinch.panStart[1] - (mid[1] - planPinch.mid[1]) / ctm.d,
+        ];
+      }
+      updateZoomUI();
+      renderPlan();
+      return;
+    }
     if (!drag) return;
+    if (drag.kind === 'measure') {
+      const [px, pz] = planPoint(ev);
+      measureLine = {
+        x1: measureLine.x1,
+        z1: measureLine.z1,
+        x2: fix(round(px, 0.05)),
+        z2: fix(round(pz, 0.05)),
+      };
+      drag.moved = true;
+      renderPlan();
+      return;
+    }
     if (drag.kind === 'marquee') {
       const [px, pz] = planPoint(ev);
       marquee = { x1: drag.start[0], z1: drag.start[1], x2: px, z2: pz };
@@ -1365,7 +1457,12 @@ export async function bootEditor(root) {
     touch();
   });
 
-  const endDrag = () => {
+  const endDrag = (ev) => {
+    if (ev?.pointerId != null) planFingers.delete(ev.pointerId);
+    if (planPinch) {
+      if (!planFingers.size) planPinch = null;
+      return;
+    }
     if (drag?.kind === 'marquee') {
       marquee = null;
       if (multiSel.size > 1) {
@@ -1444,7 +1541,9 @@ export async function bootEditor(root) {
     const head = (title, sub) => nodes.push(h('div.insp-head', h('h2', title), sub ? h('span', sub) : null));
 
     if (kind === 'home') {
-      head('Home', 'Global settings of this plan');
+      const totalM2 = doc.rooms.reduce((acc, r) => acc + (r.rect[2] * r.rect[3]), 0);
+      const totalSqFt = Math.round(totalM2 * 10.7639);
+      head('Home', `Total Area: ${totalSqFt} sq ft (${totalM2.toFixed(1)} m²) across ${doc.rooms.length} rooms`);
       doc.camera ||= { azimuth: 34, elevation: 47 };
       const u = doc.underlay || null;
       const uploadBlueprint = () => {
@@ -1652,7 +1751,9 @@ export async function bootEditor(root) {
     } else if (!item) {
       head('Nothing selected');
     } else if (kind === 'room') {
-      head(item.name || item.id, `id: ${item.id}`);
+      const rAreaM2 = (item.rect[2] * item.rect[3]).toFixed(1);
+      const rAreaSqFt = Math.round(item.rect[2] * item.rect[3] * 10.7639);
+      head(item.name || item.id, `id: ${item.id} · ${rAreaSqFt} sq ft (${rAreaM2} m²)`);
       const WALL_SWATCHES = [
         ['#ded9d0', 'Default Alabaster'],
         ['#b8c7be', 'Sage Mist'],

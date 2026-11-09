@@ -58,11 +58,15 @@ export function createWorld(canvas, config, store, { onHover, onPick, onMove, ed
   scene.add(furnitureGroup);
 
   const furnitureMeshes = [];
+  const interactiveFurnMeshes = [];
   const furnitureByIndex = new Map();
   furnitureGroup.children.forEach((g) => {
     if (g.userData?.kind === 'furniture') furnitureByIndex.set(g.userData.index, g);
     g.traverse((o) => {
-      if (o.isMesh) furnitureMeshes.push(o);
+      if (o.isMesh) {
+        furnitureMeshes.push(o);
+        if (o.userData?.interactiveProp) interactiveFurnMeshes.push(o);
+      }
     });
   });
 
@@ -92,8 +96,96 @@ export function createWorld(canvas, config, store, { onHover, onPick, onMove, ed
     ...[...lights.values()].map((u) => u.hit),
     ...[...acs.values()].map((u) => u.hit),
     ...(house.doorHits || []),
+    ...interactiveFurnMeshes,
     ...house.floors,
   ];
+
+  /* ---------- 3D Room Temperature & Wattage Heatmap Overlay ---------- */
+
+  let heatmapMode = 'off'; // 'off' | 'temp' | 'watts'
+  let autoOrbit = false;
+  const heatmapGroup = new THREE.Group();
+  heatmapGroup.visible = false;
+  scene.add(heatmapGroup);
+
+  const heatmapPads = new Map();
+  for (const rm of config.rooms) {
+    const padMat = new THREE.MeshBasicMaterial({
+      color: 0x38bdf8,
+      transparent: true,
+      opacity: 0.34,
+      depthWrite: false,
+    });
+    const pad = new THREE.Mesh(new THREE.PlaneGeometry(Math.max(0.2, rm.w - 0.14), Math.max(0.2, rm.d - 0.14)), padMat);
+    pad.rotation.x = -Math.PI / 2;
+    pad.position.set(rm.x + rm.w / 2, 0.035, rm.z + rm.d / 2);
+
+    const badgeCanvas = document.createElement('canvas');
+    badgeCanvas.width = 256;
+    badgeCanvas.height = 80;
+    const badgeTex = new THREE.CanvasTexture(badgeCanvas);
+    const spriteMat = new THREE.SpriteMaterial({ map: badgeTex, transparent: true, depthTest: false });
+    const sprite = new THREE.Sprite(spriteMat);
+    sprite.scale.set(1.65, 0.52, 1);
+    sprite.position.set(rm.x + rm.w / 2, 1.35, rm.z + rm.d / 2);
+
+    heatmapGroup.add(pad, sprite);
+    heatmapPads.set(rm.id, { rm, pad, padMat, badgeCanvas, badgeTex, sprite });
+  }
+
+  function updateHeatmapVisuals() {
+    if (heatmapMode === 'off') {
+      heatmapGroup.visible = false;
+      return;
+    }
+    heatmapGroup.visible = true;
+    for (const [roomId, entry] of heatmapPads.entries()) {
+      const { rm, padMat, badgeCanvas, badgeTex } = entry;
+      // Compute room watts
+      let watts = 0;
+      for (const l of config.lights) {
+        if (l.room !== roomId) continue;
+        const st = store.state.lights?.[l.id];
+        if (st?.on) {
+          const maxW = Number(l.watts) || 9;
+          const b = l.capabilities.includes('brightness') ? clamp(st.brightness ?? 1, 0.05, 1) : 1;
+          watts += maxW * (0.15 + 0.85 * b);
+        }
+      }
+      watts = Math.round(watts * 10) / 10;
+
+      // Compute room temperature (from room AC or outdoor baseline)
+      const roomAc = config.acs.find((a) => a.room === roomId);
+      const acSt = roomAc ? store.state.acs?.[roomAc.id] : null;
+      const tempC = acSt?.roomTemp ?? (acSt?.on ? acSt.target : (22.0 + (watts > 20 ? 0.8 : 0)));
+
+      if (heatmapMode === 'temp') {
+        const tNorm = clamp((tempC - 17) / 11, 0, 1);
+        padMat.color.setHSL(0.58 - tNorm * 0.54, 0.85, 0.52);
+      } else {
+        const wNorm = clamp(watts / 45, 0, 1);
+        padMat.color.setHSL(0.38 - wNorm * 0.36, 0.88, 0.5);
+      }
+
+      const ctx = badgeCanvas.getContext('2d');
+      ctx.clearRect(0, 0, 256, 80);
+      ctx.fillStyle = 'rgba(10, 14, 24, 0.84)';
+      ctx.beginPath();
+      ctx.roundRect(8, 8, 240, 64, 16);
+      ctx.fill();
+      ctx.strokeStyle = `#${padMat.color.getHexString()}`;
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      ctx.fillStyle = '#f8fafc';
+      ctx.font = 'bold 21px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(rm.name || rm.id, 128, 35);
+      ctx.fillStyle = '#93c5fd';
+      ctx.font = '600 18px system-ui, sans-serif';
+      ctx.fillText(`${tempC.toFixed(1)}°C  ·  ${watts}W`, 128, 60);
+      badgeTex.needsUpdate = true;
+    }
+  }
 
   // Ambience + Sun/Moon directional light
   const hemi = new THREE.HemisphereLight(0x8ea6ff, 0x0b0e17, 0.42);
@@ -214,6 +306,7 @@ export function createWorld(canvas, config, store, { onHover, onPick, onMove, ed
     az: baseAz, el: config.camera.elevation, dist: 30, target: center.clone(),
     goal: { az: baseAz, el: config.camera.elevation, dist: 30, target: center.clone() },
     zoom: 1, focus: null,
+    panOffset: new THREE.Vector3(0, 0, 0),
   };
 
   // First-person walkthrough state
@@ -225,7 +318,13 @@ export function createWorld(canvas, config, store, { onHover, onPick, onMove, ed
     goalYaw: 0,
     goalPitch: -0.06,
     keys: new Set(),
+    padF: 0,
+    padR: 0,
   };
+
+  let ecoMode = localStorage.getItem('house.ecoFps') !== '0';
+  let lastUserTouchAt = performance.now();
+  const markTouch = () => { lastUserTouchAt = performance.now(); };
 
   let width = 1;
   let height = 1;
@@ -287,14 +386,14 @@ export function createWorld(canvas, config, store, { onHover, onPick, onMove, ed
     }
     const { dist, center: c } = fitDistance(box, rig.goal.az, rig.goal.el, fill);
     rig.goal.dist = dist * rig.zoom;
-    rig.goal.target.copy(c);
+    rig.goal.target.copy(c).add(rig.panOffset);
   }
 
   function updateRig(dt, instant = false) {
     if (walkthrough) {
       const speed = 3.2;
-      let moveF = 0;
-      let moveR = 0;
+      let moveF = walk.padF || 0;
+      let moveR = walk.padR || 0;
       if (walk.keys.has('KeyW') || walk.keys.has('ArrowUp')) moveF += 1;
       if (walk.keys.has('KeyS') || walk.keys.has('ArrowDown')) moveF -= 1;
       if (walk.keys.has('KeyD') || walk.keys.has('ArrowRight')) moveR += 1;
@@ -329,6 +428,10 @@ export function createWorld(canvas, config, store, { onHover, onPick, onMove, ed
       return delta > 0.002 || moveF !== 0 || moveR !== 0;
     }
 
+    if (autoOrbit && !drag && !dragItem) {
+      rig.goal.az += dt * 11;
+    }
+
     const k = instant ? 1 : 1 - Math.exp(-dt * 5.5);
     const g = rig.goal;
     const delta = Math.abs(g.az - rig.az) + Math.abs(g.el - rig.el) + Math.abs(g.dist - rig.dist) * 2
@@ -345,7 +448,7 @@ export function createWorld(canvas, config, store, { onHover, onPick, onMove, ed
     if (house.updateCutaway?.(liveCamDir, cutawayMode)) {
       shadowFrames = Math.max(shadowFrames, 2);
     }
-    return delta > 0.002;
+    return delta > 0.002 || autoOrbit;
   }
 
   // Walkthrough keyboard listeners
@@ -371,6 +474,7 @@ export function createWorld(canvas, config, store, { onHover, onPick, onMove, ed
       unit.apply(store.state.lights[id], { ...opts, delay: opts.stagger ? 0.25 + i++ * 0.06 : 0 });
     }
     for (const [id, unit] of acs) unit.apply(store.state.acs[id], opts);
+    updateHeatmapVisuals();
     wake();
   }
 
@@ -379,6 +483,7 @@ export function createWorld(canvas, config, store, { onHover, onPick, onMove, ed
     if (change.type === 'light') lights.get(change.id)?.apply(store.state.lights[change.id]);
     else if (change.type === 'ac') acs.get(change.id)?.apply(store.state.acs[change.id]);
     else syncAll();
+    updateHeatmapVisuals();
     wake();
   });
 
@@ -460,19 +565,31 @@ export function createWorld(canvas, config, store, { onHover, onPick, onMove, ed
     wake();
   }
 
-  // Two fingers pinch to zoom, the way the scroll wheel does with a mouse.
+  // Two fingers pinch to zoom AND pan across the house on touchscreens (e.g. Surface Pro 7).
   const fingers = new Map();
   let pinch = null;
   const spread = () => {
     const [a, b] = [...fingers.values()];
     return Math.max(1, Math.hypot(a.x - b.x, a.y - b.y));
   };
+  const midpoint = () => {
+    const [a, b] = [...fingers.values()];
+    return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  };
 
   canvas.addEventListener('pointerdown', (ev) => {
+    markTouch();
     canvas.setPointerCapture(ev.pointerId);
     fingers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
     if (fingers.size === 2) {
-      pinch = { spread: spread(), zoom: rig.zoom };
+      const mid = midpoint();
+      pinch = {
+        spread: spread(),
+        zoom: rig.zoom,
+        midX: mid.x,
+        midY: mid.y,
+        panStart: rig.panOffset.clone(),
+      };
       drag = null;
       dragItem = null;
       setHover(null);
@@ -513,10 +630,24 @@ export function createWorld(canvas, config, store, { onHover, onPick, onMove, ed
   });
 
   canvas.addEventListener('pointermove', (ev) => {
-    if (fingers.has(ev.pointerId)) fingers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+    if (fingers.has(ev.pointerId)) {
+      markTouch();
+      fingers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+    }
     if (pinch) {
       if (fingers.size >= 2) {
         rig.zoom = clamp(pinch.zoom * pinch.spread / spread(), ZOOM_MIN, ZOOM_MAX);
+        const mid = midpoint();
+        const dx = mid.x - pinch.midX;
+        const dy = mid.y - pinch.midY;
+        const a = rad(rig.az);
+        const scale = (rig.dist / Math.max(300, height)) * 0.85;
+        const rx = Math.cos(a);
+        const rz = -Math.sin(a);
+        const fx = -Math.sin(a);
+        const fz = -Math.cos(a);
+        rig.panOffset.x = clamp(pinch.panStart.x - (dx * rx - dy * fx) * scale, -6, 6);
+        rig.panOffset.z = clamp(pinch.panStart.z - (dx * rz - dy * fz) * scale, -6, 6);
         frameGoal();
         wake();
       }
@@ -597,6 +728,14 @@ export function createWorld(canvas, config, store, { onHover, onPick, onMove, ed
       wake(18);
       return;
     }
+    if (!isEditable && t.kind === 'furniture' && t.interactiveProp) {
+      const toggled = furnitureGroup.userData.toggleProp?.(t.index);
+      if (toggled) {
+        shadowFrames = Math.max(shadowFrames, 3);
+        wake(30);
+      }
+      return;
+    }
     if (walkthrough && t.kind === 'room' && t.hitPoint) {
       // In walkthrough mode, clicking the floor glides you to that spot!
       walk.goalPos.x = clamp(t.hitPoint.x, minX + 0.35, maxX - 0.35);
@@ -648,11 +787,26 @@ export function createWorld(canvas, config, store, { onHover, onPick, onMove, ed
 
   function frame(now) {
     raf = 0;
-    const dt = Math.min(0.05, (now - last) / 1000);
+    const isIdleEco = ecoMode && !drag && !dragItem && !pinch && (now - lastUserTouchAt > 10000);
+    if (isIdleEco && now - last < 52) {
+      if (running) raf = requestAnimationFrame(frame);
+      return;
+    }
+    const dt = Math.min(0.06, (now - last) / 1000);
     last = now;
     let active = updateRig(dt);
     active = (house.updateDoors?.(dt) || false) || active;
     active = updateWeather(dt, now / 1000) || active;
+    if (furnitureGroup.userData.interactiveProps?.size) {
+      let anyPropActive = false;
+      for (const p of furnitureGroup.userData.interactiveProps.values()) {
+        if (p.active) { anyPropActive = true; break; }
+      }
+      if (anyPropActive) {
+        furnitureGroup.userData.updateProps?.(dt, now / 1000);
+        active = true;
+      }
+    }
     for (const unit of lights.values()) active = unit.update(dt) || active;
     for (const unit of acs.values()) active = unit.update(dt) || active;
     if (shadowFrames > 0) { renderer.shadowMap.needsUpdate = true; shadowFrames--; active = true; }
@@ -715,6 +869,30 @@ export function createWorld(canvas, config, store, { onHover, onPick, onMove, ed
       configureWeatherMaterial();
       wake(6);
     },
+    getHeatmapMode() { return heatmapMode; },
+    setHeatmapMode(mode) {
+      heatmapMode = ['off', 'temp', 'watts'].includes(mode) ? mode : 'off';
+      updateHeatmapVisuals();
+      wake(4);
+    },
+    getAutoOrbit() { return autoOrbit; },
+    setAutoOrbit(on) {
+      autoOrbit = Boolean(on);
+      wake(6);
+    },
+    getEcoMode() { return ecoMode; },
+    setEcoMode(on) {
+      ecoMode = Boolean(on);
+      localStorage.setItem('house.ecoFps', ecoMode ? '1' : '0');
+      markTouch();
+      wake(4);
+    },
+    setWalkPadInput(forward = 0, rightDir = 0) {
+      markTouch();
+      walk.padF = clamp(forward, -1, 1);
+      walk.padR = clamp(rightDir, -1, 1);
+      if (walk.padF || walk.padR) wake(6);
+    },
     getWalkthrough() { return walkthrough; },
     setWalkthrough(on, roomId = null) {
       walkthrough = Boolean(on);
@@ -762,6 +940,7 @@ export function createWorld(canvas, config, store, { onHover, onPick, onMove, ed
         return;
       }
       rig.zoom = 1;
+      rig.panOffset.set(0, 0, 0);
       rig.goal.az = baseAz + (next?.kind === 'ac' ? (WALL_SIDE[acs.get(next.id).cfg.wall] ?? 0) : 0);
       rig.goal.el = next?.kind === 'ac' ? 30 : config.camera.elevation;
       frameGoal();

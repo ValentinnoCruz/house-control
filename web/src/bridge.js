@@ -50,10 +50,82 @@ export function post(type, payload = {}) {
   }).catch(() => {});
 }
 
-// A tap you can feel, on the iPhone only: 'tick' for a step of a slider, 'light' /
+// Subtle Web-Audio tactile click/chime synthesizer for touch screens without vibration motors
+// (e.g. Microsoft Surface Pro 7 in the living room).
+let audioCtx = null;
+let lastTickAt = 0;
+
+export function isTactileSoundEnabled() {
+  return localStorage.getItem('house.soundMuted') !== '1';
+}
+
+export function setTactileSoundEnabled(on) {
+  localStorage.setItem('house.soundMuted', on ? '0' : '1');
+}
+
+function playTactileSound(kind = 'light') {
+  if (!isTactileSoundEnabled()) return;
+  const nowMs = performance.now();
+  if (kind === 'tick' && nowMs - lastTickAt < 32) return;
+  lastTickAt = nowMs;
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    if (!audioCtx) audioCtx = new Ctx();
+    if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+    const t0 = audioCtx.currentTime;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    if (kind === 'tick') {
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(920, t0);
+      osc.frequency.exponentialRampToValueAtTime(480, t0 + 0.014);
+      gain.gain.setValueAtTime(0.025, t0);
+      gain.gain.exponentialRampToValueAtTime(0.0008, t0 + 0.015);
+      osc.start(t0);
+      osc.stop(t0 + 0.016);
+    } else if (kind === 'medium') {
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(520, t0);
+      osc.frequency.exponentialRampToValueAtTime(760, t0 + 0.045);
+      gain.gain.setValueAtTime(0.045, t0);
+      gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.05);
+      osc.start(t0);
+      osc.stop(t0 + 0.052);
+    } else if (kind === 'error') {
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(220, t0);
+      osc.frequency.linearRampToValueAtTime(150, t0 + 0.09);
+      gain.gain.setValueAtTime(0.05, t0);
+      gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.095);
+      osc.start(t0);
+      osc.stop(t0 + 0.1);
+    } else {
+      // 'light' glass tap
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(680, t0);
+      osc.frequency.exponentialRampToValueAtTime(360, t0 + 0.026);
+      gain.gain.setValueAtTime(0.038, t0);
+      gain.gain.exponentialRampToValueAtTime(0.0008, t0 + 0.028);
+      osc.start(t0);
+      osc.stop(t0 + 0.03);
+    }
+  } catch { /* ignore audio context restrictions */ }
+}
+
+// A tap you can feel or hear: 'tick' for a step of a slider, 'light' /
 // 'medium' for a switch or a scene, 'error' when a device refuses a change.
 export function haptic(kind = 'light') {
   if (isPhone) post('haptic', { kind });
+  try {
+    if (navigator.vibrate) {
+      navigator.vibrate(kind === 'tick' ? 4 : kind === 'medium' ? 14 : 8);
+    }
+  } catch { /* ignore */ }
+  playTactileSound(kind);
 }
 
 // Native -> JS entry points are attached here by main.js.
