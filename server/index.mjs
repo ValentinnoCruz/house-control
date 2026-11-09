@@ -55,9 +55,13 @@ function writeJSON(file, data) {
   fs.writeFileSync(file, JSON.stringify(data, null, 2), 'utf8');
 }
 
-function logEvent(line) {
+const recentEvents = [];
+
+function logEvent(line, kind = 'system') {
   const stamp = new Date().toISOString();
   const entry = `${stamp}  ${line}\n`;
+  recentEvents.push({ ts: Date.now(), kind, message: line });
+  if (recentEvents.length > 100) recentEvents.shift();
   try {
     fs.appendFileSync(FILES.log, entry, 'utf8');
   } catch { /* ignore */ }
@@ -1327,6 +1331,31 @@ async function setWindowsAutostart(enable) {
   return getWindowsAutostartStatus();
 }
 
+const DESKTOP_KIOSK_LNK = path.join(os.homedir(), 'Desktop', 'House Control Surface Kiosk.lnk');
+
+async function createSurfaceKioskShortcut() {
+  const batPath = path.join(ROOT_DIR, 'start-surface-kiosk.bat');
+  const vbsPath = path.join(ROOT_DIR, 'start-background.vbs');
+  const batContent = [
+    '@echo off',
+    'title House Control Surface Kiosk Launcher',
+    `wscript.exe "${vbsPath}"`,
+    'timeout /t 2 /nobreak >nul',
+    'start "" msedge.exe --app="http://localhost:5199/?surface=1" --start-fullscreen',
+  ].join('\r\n');
+  fs.writeFileSync(batPath, batContent, 'utf8');
+
+  await new Promise((resolve, reject) => {
+    const psScript = `$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut('${DESKTOP_KIOSK_LNK.replace(/'/g, "''")}'); $s.TargetPath = 'cmd.exe'; $s.Arguments = '/c "${batPath.replace(/'/g, "''")}"'; $s.WorkingDirectory = '${ROOT_DIR.replace(/'/g, "''")}'; $s.WindowStyle = 7; $s.Description = 'Launch House Control in Surface 7 Fullscreen Kiosk Mode'; $s.Save()`;
+    execFile('powershell.exe', ['-NoProfile', '-Command', psScript], (err) => {
+      if (err) reject(err);
+      else resolve();
+    });
+  });
+  logEvent('Created Surface 7 Fullscreen Kiosk shortcut on Desktop', 'system');
+  return { ok: true, shortcutPath: DESKTOP_KIOSK_LNK, batPath };
+}
+
 class ScheduleManager {
   constructor() {
     const defaultSchedules = [
@@ -1359,10 +1388,13 @@ class ScheduleManager {
       circadian: false,
       awayPresence: false,
       electricityRate: 0.16,
+      sunriseAlarm: { enabled: false, time: '07:00', durationMins: 20, room: 'all' },
     });
+    this.modes.sunriseAlarm ||= { enabled: false, time: '07:00', durationMins: 20, room: 'all' };
     this.sleepTimers = new Map();
     this.lastCircadianKelvin = null;
     this.lastAwayCycleAt = 0;
+    this.lastSunriseMin = -1;
     this.save();
   }
 
@@ -1391,6 +1423,7 @@ class ScheduleManager {
       modes: { ...this.modes, awayMode: Boolean(this.modes.awayPresence) },
       sleepTimers: activeTimers,
       autostart: getWindowsAutostartStatus(),
+      weather: cachedWeather,
     };
   }
 
@@ -1401,11 +1434,43 @@ class ScheduleManager {
     if ('electricityRate' in patch && Number.isFinite(Number(patch.electricityRate))) {
       this.modes.electricityRate = Math.max(0.01, Number(patch.electricityRate));
     }
+    if (patch.sunriseAlarm && typeof patch.sunriseAlarm === 'object') {
+      this.modes.sunriseAlarm = {
+        ...this.modes.sunriseAlarm,
+        ...patch.sunriseAlarm,
+      };
+    }
     this.save();
     if (this.modes.circadian) {
       this.applyCircadianStep(true).catch(() => {});
     }
     return this.listPayload();
+  }
+
+  async triggerSunriseStep(progress = 0.7) {
+    const p = Math.max(0.05, Math.min(1, Number(progress) || 0.7));
+    const kelvin = Math.round((2200 + p * (5000 - 2200)) / 50) * 50;
+    const brightness = Math.round((0.08 + p * 0.92) * 100) / 100;
+    const plan = plans.currentPlanObject();
+    const roomTarget = this.modes.sunriseAlarm?.room || 'all';
+    const lights = (plan.lights || []).filter((l) => !l.disabled && (roomTarget === 'all' || l.room === roomTarget));
+    const lightsUpdate = {};
+    for (const l of lights) {
+      const patch = { on: true, brightness };
+      if ((l.capabilities || []).includes('temp')) {
+        patch.temp = kelvin;
+        patch.color = null;
+      } else if ((l.capabilities || []).includes('color')) {
+        patch.color = p < 0.4 ? '#ff8c42' : p < 0.75 ? '#ffd166' : '#fff8e7';
+      }
+      lightsUpdate[l.id] = patch;
+      await handleBridgeMessage({ type: 'command', kind: 'light', id: l.id, patch, state: patch }).catch(() => {});
+    }
+    if (Object.keys(lightsUpdate).length) {
+      broadcastSSE('incoming', { fn: 'adopt', args: [{ lights: lightsUpdate, source: 'Sunrise Alarm' }] });
+    }
+    logEvent(`Sunrise Wake-Up ramp (${Math.round(p * 100)}% · ${kelvin}K)`);
+    return { ok: true, progress: p, kelvin, brightness, updated: Object.keys(lightsUpdate).length };
   }
 
   startSleepTimer({ target = '', targetKind = 'all', targetId = '', label = 'Sleep Timer', minutes = 30 }) {
@@ -1609,6 +1674,19 @@ class ScheduleManager {
       await this.applyCircadianStep(false);
     }
 
+    // 2b. Gentle Sunrise Wake-Up Alarm Ramp
+    if (this.modes.sunriseAlarm?.enabled) {
+      const [ah, am] = String(this.modes.sunriseAlarm.time || '07:00').split(':').map(Number);
+      const alarmMins = (ah || 7) * 60 + (am || 0);
+      const dur = Math.max(5, Math.min(60, Number(this.modes.sunriseAlarm.durationMins) || 20));
+      const startMins = alarmMins - dur;
+      if (curMins >= startMins && curMins <= alarmMins && this.lastSunriseMin !== curMins) {
+        this.lastSunriseMin = curMins;
+        const progress = Math.max(0.05, Math.min(1, (curMins - startMins) / dur));
+        await this.triggerSunriseStep(progress);
+      }
+    }
+
     // 3. Vacation / Away Presence Simulator (cycles lived-in rooms every 20 mins between 18:00 and 23:15)
     if (this.modes.awayPresence && curMins >= 18 * 60 && curMins <= 23 * 60 + 15) {
       if (nowMs - this.lastAwayCycleAt > 20 * 60_000) {
@@ -1642,10 +1720,75 @@ class ScheduleManager {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Live Local Weather Sync (Open-Meteo + IP Geolocation Fallback)
+// ---------------------------------------------------------------------------
+let cachedWeather = {
+  tempC: 22,
+  tempF: 72,
+  mode: 'clear',
+  condition: 'Clear Sky',
+  isDay: true,
+  city: 'Local',
+  fetchedAt: 0,
+};
+
+async function fetchLocalWeather(force = false) {
+  if (!force && Date.now() - cachedWeather.fetchedAt < 15 * 60_000) {
+    return cachedWeather;
+  }
+  try {
+    let lat = 34.0522;
+    let lon = -118.2437;
+    let city = 'Local Area';
+    try {
+      const geoRes = await fetch('http://ip-api.com/json/?fields=lat,lon,city', { signal: AbortSignal.timeout(2500) });
+      if (geoRes.ok) {
+        const geo = await geoRes.json();
+        if (Number.isFinite(geo.lat) && Number.isFinite(geo.lon)) {
+          lat = geo.lat;
+          lon = geo.lon;
+          if (geo.city) city = geo.city;
+        }
+      }
+    } catch { /* fallback to default coords */ }
+
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,weather_code,is_day`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(3500) });
+    if (res.ok) {
+      const data = await res.json();
+      const cur = data?.current || {};
+      const tempC = Math.round((Number(cur.temperature_2m) || 22) * 10) / 10;
+      const tempF = Math.round(tempC * 1.8 + 32);
+      const code = Number(cur.weather_code) || 0;
+      const isDay = cur.is_day !== 0;
+
+      let mode = isDay ? 'clear' : 'stars';
+      let condition = isDay ? 'Clear Sky' : 'Starry Night';
+      if ([71, 73, 75, 77, 85, 86].includes(code)) {
+        mode = 'snow';
+        condition = 'Snowing';
+      } else if ([51, 53, 55, 61, 63, 65, 66, 67, 80, 81, 82, 95, 96, 99].includes(code)) {
+        mode = 'rain';
+        condition = code >= 95 ? 'Thunderstorm' : 'Rain';
+      } else if ([1, 2, 3, 45, 48].includes(code)) {
+        condition = isDay ? 'Partly Cloudy' : 'Cloudy Night';
+      }
+
+      cachedWeather = { tempC, tempF, mode, weatherMode: mode, condition, label: condition, isDay, city, fetchedAt: Date.now() };
+      logEvent(`Synced live weather (${city}: ${tempC}°C / ${tempF}°F · ${condition})`, 'weather');
+    }
+  } catch (e) {
+    console.warn('[Weather] Sync fallback:', e.message);
+  }
+  return cachedWeather;
+}
+
 const scheduler = new ScheduleManager();
 setInterval(() => {
   scheduler.tick().catch((e) => console.warn('[Scheduler] Tick error:', e.message));
 }, 20000);
+fetchLocalWeather(true).catch(() => {});
 
 // ---------------------------------------------------------------------------
 // Bridge Message Handler
@@ -1747,9 +1890,39 @@ async function handleBridgeMessage(msg) {
     case 'schedules.circadianStep':
       return await scheduler.applyCircadianStep(true);
 
+    case 'schedules.sunriseTest':
+      return await scheduler.triggerSunriseStep(msg.progress ?? 0.7);
+
+    case 'weather.sync': {
+      const w = await fetchLocalWeather(Boolean(msg.force));
+      return { weather: w, ...w };
+    }
+
+    case 'system.activity': {
+      const ip = primaryLanIp();
+      const log = recentEvents.slice(-50).reverse();
+      return {
+        log,
+        events: log,
+        hardware: {
+          goveeCount: govee.devices.size,
+          hueCount: hue.devices?.size || 0,
+          wsClients: sseClients.size || 1,
+        },
+        services: getServicesInfo(),
+        weather: cachedWeather,
+        lanUrl: `http://${ip}:${PORT}`,
+        autostart: getWindowsAutostartStatus(),
+      };
+    }
+
     case 'system.autostart': {
       if ('enable' in msg || 'enabled' in msg) return await setWindowsAutostart(Boolean(msg.enable ?? msg.enabled));
       return getWindowsAutostartStatus();
+    }
+
+    case 'system.kioskShortcut': {
+      return await createSurfaceKioskShortcut();
     }
 
     case 'devices.syncNow': {
@@ -2053,6 +2226,59 @@ const server = http.createServer(async (req, res) => {
         res.end(JSON.stringify({ error: e.message || String(e) }));
       }
     });
+    return;
+  }
+
+  // Zero-Auth LAN Quick Webhooks for Stream Deck, iOS Shortcuts, NFC tags & Windows Hotkeys
+  if ((req.method === 'GET' || req.method === 'POST') && url.pathname.startsWith('/api/quick/')) {
+    const parts = url.pathname.slice('/api/quick/'.length).split('/').filter(Boolean).map(decodeURIComponent);
+    const [kind, targetId, action = 'on', val] = parts;
+    const plan = plans.currentPlanObject();
+    const lights = (plan.lights || []).filter((x) => !x.disabled);
+    const lightsUpdate = {};
+
+    try {
+      if (kind === 'scene' && targetId) {
+        await scheduler.executeSchedule({ name: `Webhook Scene (${targetId})`, action: 'scene', targetId });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, kind: 'scene', scene: targetId }));
+        return;
+      }
+      if (kind === 'all') {
+        const on = (targetId || action) !== 'off';
+        for (const l of lights) {
+          lightsUpdate[l.id] = { on };
+          await handleBridgeMessage({ type: 'command', kind: 'light', id: l.id, patch: { on }, state: { on } }).catch(() => {});
+        }
+        logEvent(`Quick Webhook: All lights ${on ? 'ON' : 'OFF'}`);
+      } else if (kind === 'room' && targetId) {
+        const on = action !== 'off';
+        const roomLights = lights.filter((l) => l.room === targetId);
+        for (const l of roomLights) {
+          const patch = { on };
+          if (action === 'dim' && val) patch.brightness = Math.max(0.05, Math.min(1, Number(val) / 100));
+          lightsUpdate[l.id] = patch;
+          await handleBridgeMessage({ type: 'command', kind: 'light', id: l.id, patch, state: patch }).catch(() => {});
+        }
+        logEvent(`Quick Webhook: Room "${targetId}" → ${action}`);
+      } else if (kind === 'light' && targetId) {
+        const on = action !== 'off';
+        const patch = { on };
+        if (action === 'dim' && val) patch.brightness = Math.max(0.05, Math.min(1, Number(val) / 100));
+        lightsUpdate[targetId] = patch;
+        await handleBridgeMessage({ type: 'command', kind: 'light', id: targetId, patch, state: patch }).catch(() => {});
+        logEvent(`Quick Webhook: Light "${targetId}" → ${action}`);
+      }
+
+      if (Object.keys(lightsUpdate).length) {
+        broadcastSSE('incoming', { fn: 'adopt', args: [{ lights: lightsUpdate, source: 'Webhook' }] });
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, updated: Object.keys(lightsUpdate).length, lights: lightsUpdate }));
+    } catch (e) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: e.message }));
+    }
     return;
   }
 
