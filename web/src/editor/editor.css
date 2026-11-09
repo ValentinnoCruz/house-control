@@ -555,4 +555,40 @@ html.mode-editor, html.mode-editor body { user-select: none; }
   font-size: 10.5px;
   color: var(--faint);
 }
+.p-area {
+  fill: rgba(165, 243, 252, 0.78) !important;
+  font-size: 0.16px !important;
+}
+.zoom-btn.active {
+  background: rgba(251, 191, 36, 0.22);
+  border-color: rgba(251, 191, 36, 0.65);
+  color: #fde68a;
+}
+.p-measure-line {
+  stroke: #fbbf24;
+  stroke-width: 0.04;
+  stroke-dasharray: 0.09 0.05;
+  pointer-events: none;
+}
+.p-measure-dot {
+  fill: #fbbf24;
+  stroke: #0f172a;
+  stroke-width: 0.025;
+  pointer-events: none;
+}
+.p-measure-bg {
+  fill: rgba(15, 23, 42, 0.94);
+  stroke: #fbbf24;
+  stroke-width: 0.025;
+  pointer-events: none;
+}
+.p-measure-label {
+  font-size: 0.17px;
+  font-weight: 700;
+  fill: #fde68a;
+  text-anchor: middle;
+  dominant-baseline: middle;
+  pointer-events: none;
+}
+
 

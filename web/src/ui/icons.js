@@ -8,13 +8,14 @@ import {
   HouseWifi, Smartphone, Radar, CircleCheck, CircleAlert, ChevronRight, Unlink, LoaderCircle, Router,
   Lock, Unlock, Eye, EyeOff, Maximize2, Minimize2, ZoomIn, ZoomOut, Move,
   Star, Calendar, QrCode, History, Layers, Bookmark, Trash2, Play,
-  Mic, Volume2, Monitor, Zap, Footprints, CloudRain, Search, Image, Timer, Plane,
+  Mic, Volume2, VolumeX, Monitor, Zap, Footprints, CloudRain, Search, Image, Timer, Plane,
+  Ruler, AlarmClock, Compass, Battery, BatteryCharging, ChevronUp,
 } from 'lucide';
 
 const ICONS = {
   power: Power, sun: Sun, sofa: Sofa, film: Film, moon: Moon, door: DoorOpen,
   ceiling: LampCeiling, fanBulb: Lightbulb, pendant: Lamp, spots: Lightbulb, floor: LampFloor, table: LampDesk, strip: Sparkles,
-  cool: Snowflake, heat: Flame, dry: Droplets, fan: Fan, auto: RefreshCw, wind: Wind, leaf: Leaf,
+  cool: Snowflake, heat: Flame, flame: Flame, dry: Droplets, fan: Fan, auto: RefreshCw, wind: Wind, leaf: Leaf,
   down: ChevronDown, back: ChevronLeft, plus: Plus, minus: Minus, thermo: Thermometer,
   sliders: SlidersHorizontal, check: Check, home: House, settings: Settings2, ac: AirVent,
   folder: FolderOpen, plug: Plug, dim: SunDim, bright: SunMedium, tv: Tv, bed: BedDouble,
@@ -28,8 +29,10 @@ const ICONS = {
   zoomIn: ZoomIn, zoomOut: ZoomOut, move: Move,
   star: Star, calendar: Calendar, qr: QrCode, history: History, layers: Layers,
   bookmark: Bookmark, trash: Trash2, play: Play, sync: RefreshCw,
-  mic: Mic, music: Volume2, screen: Monitor, zap: Zap, walk: Footprints,
+  mic: Mic, music: Volume2, mute: VolumeX, screen: Monitor, zap: Zap, walk: Footprints,
   rain: CloudRain, search: Search, image: Image, timer: Timer, away: Plane,
+  ruler: Ruler, alarm: AlarmClock, compass: Compass,
+  battery: Battery, batteryCharging: BatteryCharging, up: ChevronUp,
 };
 
 export function icon(name, size = 18, stroke = 1.8) {

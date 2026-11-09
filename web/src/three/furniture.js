@@ -169,14 +169,25 @@ const builders = {
     const screen = new THREE.MeshStandardMaterial({
       color: '#05070c', roughness: 0.25, emissive: '#27407a', emissiveIntensity: 0.35,
     });
-    return group(
+    const tvLight = new THREE.PointLight('#4c7dff', 0, 3.6, 1.6);
+    tvLight.position.set(0, 0.78, 0.25);
+    const g = group(
       at(box(width, 0.36, 0.4, mat(color || DARK_WOOD, { rough: 0.6 }), { r: 0.015 }), 0, 0.1, 0),
       ...legs(width, 0.4, 0.1, mat(BLACK), 0.08, 0.015),
       ...doorLines(width, 0.3, 0.13, 0.2, 3, mat(BLACK)),
       at(box(sw + 0.03, sh + 0.03, 0.035, mat(BLACK, { rough: 0.4 }), { r: 0.008 }), 0, 0.72, -0.15),
       at(box(sw - 0.02, sh - 0.02, 0.01, screen, { r: 0 }), 0, 0.745, -0.129),
       at(box(0.5, 0.07, 0.09, mat('#2a2c33', { rough: 0.7 }), { r: 0.02 }), 0, 0.46, 0.05),
+      tvLight,
     );
+    g.userData.interactiveProp = {
+      kind: 'tv',
+      label: 'Smart TV',
+      active: false,
+      screenMat: screen,
+      light: tvLight,
+    };
+    return g;
   },
 
   sideboard({ width = 1.6, color = WOOD }) {
@@ -331,16 +342,38 @@ const builders = {
   },
 
   bathtub({ color = WHITE } = {}) {
-    return group(
+    const waterMat = new THREE.MeshStandardMaterial({
+      color: '#9fd3ec', roughness: 0.1, emissive: '#1d4f6b', emissiveIntensity: 0.25,
+    });
+    const streamMat = new THREE.MeshStandardMaterial({
+      color: '#b8e6ff', roughness: 0.08, emissive: '#38bdf8', emissiveIntensity: 0.55, transparent: true, opacity: 0.72,
+    });
+    const stream = at(cyl(0.011, 0.016, 0.22, streamMat, 10), -0.68, 0.54, 0);
+    stream.visible = false;
+    const g = group(
       at(box(1.7, 0.56, 0.78, mat(color || WHITE, { rough: 0.25 }), { r: 0.1 }), 0, 0, 0),
-      at(box(1.5, 0.02, 0.58, mat('#9fd3ec', { rough: 0.1, emissive: '#1d4f6b', emissiveIntensity: 0.25 }), { r: 0.009 }), 0, 0.545, 0),
+      at(box(1.5, 0.02, 0.58, waterMat, { r: 0.009 }), 0, 0.545, 0),
       at(cyl(0.014, 0.014, 0.2, mat(METAL, { rough: 0.2, metal: 0.9 }), 10), -0.74, 0.56, 0),
+      stream,
     );
+    g.userData.interactiveProp = {
+      kind: 'water',
+      label: 'Bathtub Water',
+      active: false,
+      waterMat,
+      streamMesh: stream,
+    };
+    return g;
   },
 
   tubShower({ width = 1.7, depth = 0.8, color = WHITE }) {
     const tubMat = mat(color || WHITE, { rough: 0.22 });
-    const waterMat = mat('#9fd3ec', { rough: 0.1, emissive: '#1d4f6b', emissiveIntensity: 0.25 });
+    const waterMat = new THREE.MeshStandardMaterial({
+      color: '#9fd3ec', roughness: 0.1, emissive: '#1d4f6b', emissiveIntensity: 0.25,
+    });
+    const streamMat = new THREE.MeshStandardMaterial({
+      color: '#b8e6ff', roughness: 0.08, emissive: '#38bdf8', emissiveIntensity: 0.55, transparent: true, opacity: 0.52,
+    });
     const chrome = mat(METAL, { rough: 0.18, metal: 0.92 });
     const darkMetal = mat(BLACK, { rough: 0.3, metal: 0.8 });
     const glass = new THREE.MeshStandardMaterial({
@@ -351,7 +384,9 @@ const builders = {
     const headX = -width / 2 + 0.1;
     const arm = at(cyl(0.012, 0.012, 0.34, chrome, 10), headX + 0.17, 1.98, 0);
     arm.rotation.z = Math.PI / 2;
-    return group(
+    const showerSpray = at(cyl(0.16, 0.09, 1.4, streamMat, 14), headX + 0.32, 0.54, 0);
+    showerSpray.visible = false;
+    const g = group(
       at(box(width, 0.54, depth, tubMat, { r: 0.06 }), 0, 0, 0),
       at(box(Math.max(0.2, width - 0.18), 0.02, Math.max(0.2, depth - 0.18), waterMat, { r: 0.009 }), 0, 0.525, 0),
       at(cyl(0.028, 0.028, 0.01, chrome, 14), headX + 0.14, 0.535, 0),
@@ -364,7 +399,16 @@ const builders = {
       at(box(screenW, screenH, 0.016, glass, { r: 0.004 }), -width / 2 + screenW / 2 + 0.03, 0.54, depth / 2 - 0.03),
       at(box(0.024, screenH, 0.028, darkMetal, { r: 0.004 }), -width / 2 + 0.03, 0.54, depth / 2 - 0.03),
       at(box(screenW, 0.02, 0.024, darkMetal, { r: 0.004 }), -width / 2 + screenW / 2 + 0.03, 0.54, depth / 2 - 0.03),
+      showerSpray,
     );
+    g.userData.interactiveProp = {
+      kind: 'water',
+      label: 'Tub Shower',
+      active: false,
+      waterMat,
+      streamMesh: showerSpray,
+    };
+    return g;
   },
 
   toilet({ color = WHITE } = {}) {
@@ -427,12 +471,33 @@ const builders = {
     const ember = new THREE.MeshStandardMaterial({
       color: '#ff6a2b', roughness: 0.4, emissive: '#ff4500', emissiveIntensity: 0.85,
     });
-    return group(
+    const flameMat = new THREE.MeshStandardMaterial({
+      color: '#ff9e00', roughness: 0.3, emissive: '#ff5400', emissiveIntensity: 1.4, transparent: true, opacity: 0.88,
+    });
+    const flames = [-0.14, 0, 0.14].map((fx, i) => {
+      const cone = new THREE.Mesh(new THREE.ConeGeometry(0.065, 0.22 + (i === 1 ? 0.06 : 0), 8), flameMat);
+      cone.position.set(fx, 0.24, depth / 2 - 0.04);
+      return cone;
+    });
+    const fireLight = new THREE.PointLight('#ff6d00', 1.6, 3.8, 1.5);
+    fireLight.position.set(0, 0.32, depth / 2 + 0.18);
+    const g = group(
       at(box(width, height, depth, stone, { r: 0.02 }), 0, 0, 0),
       at(box(width + 0.08, 0.06, depth + 0.06, mantel, { r: 0.012 }), 0, height - 0.06, 0.02),
       at(box(width * 0.58, height * 0.55, 0.12, hearth, { r: 0.01 }), 0, 0.08, depth / 2 - 0.04),
       at(box(width * 0.42, 0.08, 0.14, ember, { r: 0.02 }), 0, 0.12, depth / 2 - 0.05),
+      ...flames,
+      fireLight,
     );
+    g.userData.interactiveProp = {
+      kind: 'chimney',
+      label: 'Fireplace Hearth',
+      active: true,
+      emberMat: ember,
+      flames,
+      light: fireLight,
+    };
+    return g;
   },
 
   washer({ width = 0.65, color = WHITE }) {
@@ -631,6 +696,7 @@ export function footprint(item) {
 
 export function buildFurniture(items) {
   const root = new THREE.Group();
+  const interactiveProps = new Map();
   items.forEach((item, index) => {
     const make = builders[item.type];
     if (!make || !Array.isArray(item.pos)) {
@@ -645,15 +711,64 @@ export function buildFurniture(items) {
     g.position.set(item.pos[0], item.y || 0, item.pos[1]);
     g.rotation.y = THREE.MathUtils.degToRad(item.rot || 0);
     g.userData = { ...g.userData, kind: 'furniture', index };
+    if (g.userData.interactiveProp) {
+      interactiveProps.set(index, g.userData.interactiveProp);
+    }
     const flat = g.userData.flat;
     g.traverse((o) => {
       if (o.isMesh) {
         o.castShadow = !flat;
         o.receiveShadow = true;
-        o.userData = { ...o.userData, kind: 'furniture', index };
+        o.userData = { ...o.userData, kind: 'furniture', index, interactiveProp: Boolean(g.userData.interactiveProp) };
       }
     });
     root.add(g);
   });
+
+  root.userData.interactiveProps = interactiveProps;
+  root.userData.toggleProp = (index) => {
+    const p = interactiveProps.get(index);
+    if (!p) return null;
+    p.active = !p.active;
+    if (p.kind === 'tv') {
+      p.screenMat.emissiveIntensity = p.active ? 1.35 : 0.35;
+      p.light.intensity = p.active ? 1.6 : 0;
+    } else if (p.kind === 'chimney') {
+      p.emberMat.emissiveIntensity = p.active ? 1.1 : 0.15;
+      p.flames.forEach((f) => { f.visible = p.active; });
+      p.light.intensity = p.active ? 1.6 : 0;
+    } else if (p.kind === 'water') {
+      p.waterMat.emissiveIntensity = p.active ? 0.75 : 0.25;
+      if (p.streamMesh) p.streamMesh.visible = p.active;
+    }
+    return { label: p.label, active: p.active };
+  };
+
+  root.userData.updateProps = (dt, elapsed) => {
+    for (const [idx, p] of interactiveProps.entries()) {
+      if (!p.active) continue;
+      if (p.kind === 'tv') {
+        const hue = (elapsed * 0.08 + idx * 0.2) % 1;
+        p.screenMat.emissive.setHSL(hue, 0.72, 0.48);
+        p.light.color.setHSL(hue, 0.72, 0.55);
+        p.light.intensity = 1.35 + 0.35 * Math.sin(elapsed * 3.8);
+      } else if (p.kind === 'chimney') {
+        const flicker = 1.2 + 0.55 * Math.sin(elapsed * 9.5) + 0.25 * Math.cos(elapsed * 16.3);
+        p.light.intensity = Math.max(0.6, flicker);
+        p.emberMat.emissiveIntensity = 0.75 + 0.35 * Math.sin(elapsed * 6.2);
+        p.flames.forEach((cone, i) => {
+          cone.scale.y = 0.78 + 0.35 * Math.abs(Math.sin(elapsed * (8 + i * 2.3) + i));
+          cone.rotation.z = 0.08 * Math.sin(elapsed * 7 + i);
+        });
+      } else if (p.kind === 'water') {
+        p.waterMat.emissiveIntensity = 0.5 + 0.3 * Math.sin(elapsed * 4.5 + idx);
+        if (p.streamMesh) {
+          p.streamMesh.scale.x = 0.9 + 0.15 * Math.sin(elapsed * 14);
+          p.streamMesh.scale.z = 0.9 + 0.15 * Math.cos(elapsed * 14);
+        }
+      }
+    }
+  };
+
   return root;
 }
