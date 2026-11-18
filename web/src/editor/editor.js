@@ -156,6 +156,7 @@ export async function bootEditor(root) {
   let activeGuides = []; // [{ x1, z1, x2, z2 }]
   let activeRulers = []; // [{ x1, z1, x2, z2, label }]
   let measureMode = false;
+  let boxSelectMode = false;
   let measureLine = null; // { x1, z1, x2, z2 }
   const backupsState = { list: null, busy: false, error: null };
 
@@ -211,15 +212,27 @@ export async function bootEditor(root) {
   }
 
   const measureBtn = h('button.zoom-btn', {
-    title: 'Interactive Tape Measure tool — click & drag on the 2D plan to measure any distance',
+    title: 'Interactive Tape Measure tool — tap & drag on the 2D plan to measure any distance',
     onclick: () => {
       measureMode = !measureMode;
+      if (measureMode) { boxSelectMode = false; boxSelectBtn.classList.remove('active'); }
       if (!measureMode) measureLine = null;
       measureBtn.classList.toggle('active', measureMode);
       renderPlan();
-      toast(measureMode ? 'Tape Measure ON — click & drag anywhere on the 2D plan to measure' : 'Tape Measure OFF');
+      toast(measureMode ? 'Tape Measure ON — drag on the 2D plan to measure' : 'Tape Measure OFF');
     },
   }, icon('ruler', 13), 'Measure');
+
+  const boxSelectBtn = h('button.zoom-btn', {
+    title: 'Touch Box Multi-Select — drag a box on empty space to select multiple furniture items without Shift key',
+    onclick: () => {
+      boxSelectMode = !boxSelectMode;
+      if (boxSelectMode) { measureMode = false; measureLine = null; measureBtn.classList.remove('active'); }
+      boxSelectBtn.classList.toggle('active', boxSelectMode);
+      renderPlan();
+      toast(boxSelectMode ? 'Touch Box-Select ON — drag across furniture items to multi-select' : 'Touch Box-Select OFF');
+    },
+  }, icon('layers', 13), 'Box Select');
 
   const zoomBar = h('div.zoom-bar',
     h('button.zoom-btn', { title: 'Zoom out 2D plan (−)', onclick: () => stepZoom2D(1 / 1.25) }, icon('zoomOut', 14)),
@@ -229,7 +242,8 @@ export async function bootEditor(root) {
       title: 'Reset 2D view',
       onclick: () => { zoom2D = 1; pan2D = [0, 0]; measureLine = null; updateZoomUI(); renderPlan(); },
     }, 'Reset'),
-    measureBtn);
+    measureBtn,
+    boxSelectBtn);
 
   const previewToggle = h('button.chip', {
     title: 'Toggle preview lights',
@@ -318,19 +332,20 @@ export async function bootEditor(root) {
   }
 
   function render3DEditBar() {
-    if (!edit3D && previewSize !== 'full') {
+    const kind = sel.kind;
+    const item = sel.index != null ? doc[KEYS[kind]]?.[sel.index] : null;
+    const hasSelectedItem = Boolean(item && ['furniture', 'light', 'room', 'ac'].includes(kind));
+    if (!edit3D && previewSize !== 'full' && !hasSelectedItem) {
       previewEditBar.replaceChildren();
       previewEditBar.hidden = true;
       return;
     }
     previewEditBar.hidden = false;
-    const kind = sel.kind;
-    const item = sel.index != null ? doc[KEYS[kind]]?.[sel.index] : null;
-    if (!item || !['furniture', 'light', 'room', 'ac'].includes(kind)) {
+    if (!hasSelectedItem) {
       previewEditBar.replaceChildren(
         h('span.pe-hint', edit3D
-          ? '3D Edit Active: Click any furniture or light in 3D to select, drag across the floor to move, or drag empty space to orbit.'
-          : 'Click "3D Edit: OFF" above to enable dragging objects directly inside 3D.')
+          ? '3D Edit Active: Tap any furniture or light in 3D to select, drag across the floor to move, or drag empty space to orbit.'
+          : 'Tap "3D Edit: OFF" above to enable dragging objects directly inside 3D.')
       );
       return;
     }
@@ -1030,7 +1045,7 @@ export async function bootEditor(root) {
 
     if (sel.kind === 'room' && doc.rooms[sel.index] && !doc.rooms[sel.index].locked) {
       const [x, z, w, d] = doc.rooms[sel.index].rect;
-      kids.push(sv('circle', { cx: x + w, cy: z + d, r: 0.16 / Math.sqrt(zoom2D), class: 'p-handle', 'data-kind': 'resize', 'data-index': sel.index }));
+      kids.push(sv('circle', { cx: x + w, cy: z + d, r: 0.22 / Math.sqrt(zoom2D), class: 'p-handle', 'data-kind': 'resize', 'data-index': sel.index }));
     } else if (sel.kind === 'furniture' && doc.furniture[sel.index] && !doc.furniture[sel.index].locked) {
       const f = doc.furniture[sel.index];
       if (Array.isArray(f.pos)) {
@@ -1041,15 +1056,15 @@ export async function bootEditor(root) {
         const [ax, az] = topLeftAnchor(f);
         // Show small anchor dot on the fixed corner and draggable handle on the active resize corner
         kids.push(
-          sv('circle', { cx: ax, cy: az, r: 0.08 / Math.sqrt(zoom2D), class: 'p-anchor-dot' }),
-          sv('circle', { cx: hx, cy: hz, r: 0.15 / Math.sqrt(zoom2D), class: 'p-handle', 'data-kind': 'resize-furn', 'data-index': sel.index })
+          sv('circle', { cx: ax, cy: az, r: 0.09 / Math.sqrt(zoom2D), class: 'p-anchor-dot' }),
+          sv('circle', { cx: hx, cy: hz, r: 0.22 / Math.sqrt(zoom2D), class: 'p-handle', 'data-kind': 'resize-furn', 'data-index': sel.index })
         );
       }
     } else if (sel.kind === 'opening' && doc.openings[sel.index] && !doc.openings[sel.index].locked) {
       const o = doc.openings[sel.index];
       kids.push(
-        sv('circle', { cx: o.from[0], cy: o.from[1], r: 0.15 / Math.sqrt(zoom2D), class: 'p-handle', 'data-kind': 'resize-open-from', 'data-index': sel.index }),
-        sv('circle', { cx: o.to[0], cy: o.to[1], r: 0.15 / Math.sqrt(zoom2D), class: 'p-handle', 'data-kind': 'resize-open-to', 'data-index': sel.index })
+        sv('circle', { cx: o.from[0], cy: o.from[1], r: 0.22 / Math.sqrt(zoom2D), class: 'p-handle', 'data-kind': 'resize-open-from', 'data-index': sel.index }),
+        sv('circle', { cx: o.to[0], cy: o.to[1], r: 0.22 / Math.sqrt(zoom2D), class: 'p-handle', 'data-kind': 'resize-open-to', 'data-index': sel.index })
       );
     }
     plan.replaceChildren(...kids);
@@ -1215,8 +1230,8 @@ export async function bootEditor(root) {
       return;
     }
 
-    // Shift + Drag on empty space starts marquee box multi-selection
-    if (ev.shiftKey && (!kind || kind === 'none') && ev.button === 0 && !spaceDown) {
+    // Shift + Drag (or Touch Box-Select Mode) starts marquee box multi-selection
+    if ((ev.shiftKey || boxSelectMode) && (!kind || kind === 'none' || boxSelectMode) && ev.button === 0 && !spaceDown) {
       const [sx, sz] = planPoint(ev);
       marquee = { x1: sx, z1: sz, x2: sx, z2: sz };
       drag = { kind: 'marquee', start: [sx, sz], moved: false };

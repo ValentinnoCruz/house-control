@@ -1647,32 +1647,181 @@ html.ios .fatal { margin: calc(env(safe-area-inset-top, 0px) + 20px) 16px 0; wid
   transform: scale(0.96);
 }
 
-/* Touch-First Surface Pro 7 Ergonomics */
-@media (pointer: coarse) {
-  .tile-fav { opacity: 0.85 !important; }
-  .pill.tiny { min-height: 31px; padding: 0 11px; font-size: 12px; }
-  .dock-btn { height: 42px; font-size: 12.5px; }
-  .room { min-height: 36px; padding: 0 14px; }
+/* Touch-First Surface Pro 7 Ergonomics & Tablet Full-Viewport Layout */
+
+* {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
 }
+
+button, .tile, .scene, .room, .pill, .dock-btn, .option, .swatch, .toggle-chip {
+  touch-action: manipulation;
+}
+
+.tile.dimmable {
+  touch-action: pan-y;
+}
+
+html:not(.native) .notch {
+  display: none;
+}
+
+#app:has(.card.tablet-fullscreen) {
+  padding: 0;
+  place-items: stretch;
+}
+.card.tablet-fullscreen {
+  --stage-h: min(460px, 47vh);
+  width: 100vw;
+  height: 100vh;
+  max-width: 100vw;
+  border-radius: 0;
+  box-shadow: none;
+}
+.card.tablet-fullscreen .card-clip {
+  border-radius: 0;
+  box-shadow: none;
+}
+.card.tablet-fullscreen .top {
+  padding: 16px 24px 0;
+}
+.card.tablet-fullscreen .panel {
+  padding: 0 22px 18px;
+}
+.card.tablet-fullscreen .sheet {
+  padding: 0 24px 20px;
+  max-width: 820px;
+  width: 100%;
+  margin: 0 auto;
+}
+.card.tablet-fullscreen .sheet-body-scroll {
+  max-height: calc(53vh - 70px);
+}
+@media (min-width: 720px) {
+  .card.tablet-fullscreen .grid {
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 10px;
+  }
+}
+
+@media (pointer: coarse) {
+  .tile-fav { opacity: 0.9 !important; width: 34px; height: 34px; }
+  .pill.tiny { min-height: 34px; padding: 0 12px; font-size: 12px; }
+  .dock-btn { height: 44px; font-size: 13px; }
+  .room { min-height: 38px; padding: 0 15px; font-size: 13.5px; }
+  .tile { min-height: 76px; border-radius: 22px; padding: 0 14px; }
+  .tile .bubble { width: 46px; height: 46px; border-radius: 15px; }
+  .tile-more { width: 40px !important; height: 40px !important; }
+  .stepper button { width: 38px; height: 38px; border-radius: 12px; }
+  .mini-power { width: 42px; height: 42px; }
+  .slider-track, .slider-thumb { height: 52px; border-radius: 17px; }
+  .slider-thumb { width: 52px; left: calc(var(--p) * (100% - 52px)); }
+  .slider-fill { width: calc(var(--p) * (100% - 52px) + 52px); border-radius: 17px; }
+  .slider.compact .slider-track, .slider.compact .slider-thumb { height: 44px; }
+  .swatch { height: 38px; border-radius: 12px; }
+  .room-master-range { height: 28px; }
+}
+
 .card.surface-touch .tile-fav {
-  opacity: 0.85 !important;
+  opacity: 0.9 !important;
+  width: 34px;
+  height: 34px;
 }
 .card.surface-touch .pill.tiny {
-  min-height: 32px;
-  padding: 0 11px;
+  min-height: 34px;
+  padding: 0 12px;
   font-size: 12px;
 }
+.card.surface-touch .pill {
+  min-height: 34px;
+  padding: 0 14px;
+  font-size: 12.5px;
+}
 .card.surface-touch .dock-btn {
-  height: 42px;
+  height: 44px;
+  font-size: 13px;
+}
+.card.surface-touch .scene {
+  height: 68px;
+  border-radius: 20px;
   font-size: 12.5px;
 }
 .card.surface-touch .room {
-  min-height: 36px;
-  padding: 0 14px;
+  min-height: 38px;
+  padding: 0 15px;
+  font-size: 13.5px;
 }
 .card.surface-touch .round {
-  width: 40px;
-  height: 40px;
+  width: 42px;
+  height: 42px;
+}
+.card.surface-touch .power {
+  width: 50px;
+  height: 50px;
+}
+.card.surface-touch .tile {
+  min-height: 76px;
+  border-radius: 22px;
+  padding: 0 14px;
+}
+.card.surface-touch .tile .bubble {
+  width: 46px;
+  height: 46px;
+  border-radius: 15px;
+}
+.card.surface-touch .tile-name {
+  font-size: 14px;
+}
+.card.surface-touch .tile-sub {
+  font-size: 12px;
+}
+.card.surface-touch .tile-more {
+  width: 40px !important;
+  height: 40px !important;
+}
+.card.surface-touch .stepper button {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+}
+.card.surface-touch .mini-power {
+  width: 42px;
+  height: 42px;
+}
+.card.surface-touch .slider-track,
+.card.surface-touch .slider-thumb {
+  height: 52px;
+  border-radius: 17px;
+}
+.card.surface-touch .slider-thumb {
+  width: 52px;
+  left: calc(var(--p) * (100% - 52px));
+}
+.card.surface-touch .slider-fill {
+  width: calc(var(--p) * (100% - 52px) + 52px);
+  border-radius: 17px;
+}
+.card.surface-touch .slider.compact .slider-track,
+.card.surface-touch .slider.compact .slider-thumb {
+  height: 44px;
+}
+.card.surface-touch .swatch {
+  height: 38px;
+  border-radius: 12px;
+}
+.card.surface-touch .pad {
+  min-height: 96px;
+  max-height: 150px;
+}
+.card.surface-touch .room-master-range {
+  height: 28px;
+}
+.card.surface-touch .grid-hint {
+  grid-column: 1 / -1;
+  margin: 10px 4px 4px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--faint);
 }
 
 

@@ -12,7 +12,7 @@ import { computeCircadianKelvin } from '../config.js';
 import { lightColor } from '../three/lights.js';
 import { MODE_COLORS } from '../three/ac.js';
 import { AC_SWINGS } from '../store.js';
-import { haptic, isPhone, call, isTactileSoundEnabled, setTactileSoundEnabled } from '../bridge.js';
+import { haptic, isPhone, isTouchDevice, call, isTactileSoundEnabled, setTactileSoundEnabled } from '../bridge.js';
 import {
   createWakeAndKioskManager, createBatteryMonitor, createStandbyScreensaver,
   createLivingRoomDock, createWalkthroughTouchPad, createGuestPinLock,
@@ -443,8 +443,11 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
       aiBadge, cmdBtn, voiceBtn, kioskBtn, guestLockBtn, editPlanBtn, gear, power),
     tooltip, panel, sheet, toastEl);
   const card = h('div.card.booting', h('div.notch'), clip);
-  if (typeof window !== 'undefined' && (window.matchMedia?.('(pointer: coarse)')?.matches || new URLSearchParams(location.search).get('surface') === '1')) {
+  if (isTouchDevice || localStorage.getItem('house.surfaceTouch') !== '0') {
     card.classList.add('surface-touch');
+  }
+  if (localStorage.getItem('house.tabletLayout') !== '0') {
+    card.classList.add('tablet-fullscreen');
   }
   root.replaceChildren(card);
 
@@ -596,7 +599,7 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
       const s = state.lights[cfg.id];
       gesture = { x: ev.clientX, y: ev.clientY, start: s.on ? s.brightness : 0, moved: false, step: null };
       el.classList.add('pressed');
-      if (isPhone && hasSheet) {
+      if ((isPhone || isTouchDevice || ev.pointerType === 'touch') && hasSheet) {
         gesture.hold = setTimeout(() => {
           if (!gesture || gesture.moved) return;
           gesture = null;
@@ -811,8 +814,8 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
       }
     }
     if (!nodes.length) nodes.push(h('div.group-label', 'No devices in this room yet'));
-    else if (isPhone && config.lights.some((l) => l.capabilities.length && inScope(l))) {
-      nodes.push(h('div.grid-hint', 'Touch and hold a light for brightness, effects and colour'));
+    else if ((isPhone || isTouchDevice) && config.lights.some((l) => l.capabilities.length && inScope(l))) {
+      nodes.push(h('div.grid-hint', 'Tap a light to toggle · swipe across a tile to dim · touch and hold (or tap sliders) for colour & effects'));
     }
     grid.replaceChildren(...nodes);
   }
@@ -1598,8 +1601,10 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
       const isFs = wakeKiosk.isFullscreen;
       const wakeOn = wakeKiosk.wakeEnabled;
       const ecoOn = Boolean(world?.getEcoMode?.() ?? true);
+      const dprCap = Number(world?.getDprCap?.() ?? 1.35);
       const soundOn = isTactileSoundEnabled();
       const touchSizing = card.classList.contains('surface-touch');
+      const tabletFull = card.classList.contains('tablet-fullscreen');
       const pinIn = h('input.sheet-input', {
         type: 'text',
         maxLength: 4,
@@ -1668,10 +1673,43 @@ export function createPanel(root, config, store, { onFocus, onMenu }) {
                 h('span', 'Enlarges sliders, pills & favorite stars for finger touch')),
               h(`button.pill.tiny${touchSizing ? '.active' : ''}`, {
                 onclick: () => {
-                  card.classList.toggle('surface-touch', !touchSizing);
+                  const next = !touchSizing;
+                  card.classList.toggle('surface-touch', next);
+                  localStorage.setItem('house.surfaceTouch', next ? '1' : '0');
                   renderHub();
                 },
-              }, touchSizing ? 'Large Touch' : 'Standard')))
+              }, touchSizing ? 'Large Touch' : 'Standard'))),
+
+          h(`div.smart-mode-card${tabletFull ? '.on' : ''}`,
+            h('div.smart-mode-head',
+              icon('maximize', 16),
+              h('div',
+                h('b', 'Surface Tablet Full-Viewport Layout'),
+                h('span', 'Expands card edge-to-edge across the 12.3" Surface screen with multi-column tiles')),
+              h(`button.pill.tiny${tabletFull ? '.active' : ''}`, {
+                onclick: () => {
+                  const next = !tabletFull;
+                  card.classList.toggle('tablet-fullscreen', next);
+                  localStorage.setItem('house.tabletLayout', next ? '1' : '0');
+                  setTimeout(() => world?.resize?.(), 60);
+                  renderHub();
+                },
+              }, tabletFull ? 'Full Tablet' : 'Compact Card'))),
+
+          h(`div.smart-mode-card${dprCap <= 1.4 ? '.on' : ''}`,
+            h('div.smart-mode-head',
+              icon('zap', 16),
+              h('div',
+                h('b', 'Surface i5-1035G4 Retina 3D Resolution'),
+                h('span', dprCap <= 1.4 ? 'Balanced 1.35x Retina (55% less GPU heat on 2736×1824 screen)' : 'Native 2.0x Ultra PixelSense resolution')),
+              h(`button.pill.tiny${dprCap <= 1.4 ? '.active' : ''}`, {
+                onclick: () => {
+                  const nextCap = dprCap <= 1.4 ? 2.0 : 1.35;
+                  world?.setDprCap?.(nextCap);
+                  toast(nextCap <= 1.4 ? '3D Resolution: Balanced 1.35x (cool fanless Surface mode)' : '3D Resolution: Native 2.0x Ultra');
+                  renderHub();
+                },
+              }, dprCap <= 1.4 ? 'Balanced 1.35x' : 'Ultra 2.0x')))
         ),
 
         h('div.field-label', h('span', 'Ambient Living Room Clock & Weather Screensaver')),

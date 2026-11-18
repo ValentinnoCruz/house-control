@@ -28,6 +28,10 @@ export const platform = new URLSearchParams(location.search).get('platform')
   || window.__HOUSE_BOOT__?.platform
   || (handler ? 'macos' : 'web');
 export const isPhone = platform === 'ios';
+export const isTouchDevice = isPhone
+  || (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0)
+  || (typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)')?.matches)
+  || (typeof localStorage !== 'undefined' && localStorage.getItem('house.surfaceTouch') !== '0');
 
 export function post(type, payload = {}) {
   if (handler) {
