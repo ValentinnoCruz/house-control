@@ -5,7 +5,7 @@ import { createPanel } from './ui/panel.js';
 import { createAgent } from './agent/tools.js';
 import { h, openMenu } from './ui/dom.js';
 import { icon } from './ui/icons.js';
-import { isNative, isWebBackend, isPhone, post, incoming, haptic } from './bridge.js';
+import { isNative, isWebBackend, isPhone, isTouchDevice, post, incoming, haptic } from './bridge.js';
 
 const DEMO_PLANS = [
   { id: 'home', name: 'Demo · Apartment' },
@@ -16,6 +16,15 @@ const STAGE_INSETS = [62, 50]; // header above, panel overlap below
 const app = document.getElementById('app');
 if (isNative && !isWebBackend) document.documentElement.classList.add('native');
 if (isPhone) document.documentElement.classList.add('ios');
+if (isTouchDevice) document.documentElement.classList.add('touch-ui');
+
+// Prevent Windows touch long-press from popping up the browser right-click context menu on interactive UI
+window.addEventListener('contextmenu', (ev) => {
+  if (ev.target.closest('input, textarea, code, .webhook-url, .qr-url')) return;
+  if (ev.target.closest('.tile, .slider, .pad, .scene, .room, .dock-btn, .pill, .round, canvas, svg.plan, .walk-touch-pad')) {
+    ev.preventDefault();
+  }
+});
 
 // ?safeTop=62&safeBottom=34 stands in for a phone's safe areas when its layout is looked at in a browser.
 for (const edge of ['top', 'bottom']) {
@@ -99,16 +108,23 @@ async function boot() {
   incoming.shown = show;
   incoming.hidden = () => { hide(); panel.closeSheet(); if (panel.room !== 'all') panel.selectRoom('all'); };
   incoming.setNotch = (x) => panel.setNotch(x);
-  if (isPhone) {
-    // Swiping in from the left edge goes back from a device sheet, as it does everywhere on iOS.
-    let edge = null;
-    window.addEventListener('pointerdown', (ev) => { edge = ev.clientX < 28 ? { x: ev.clientX, y: ev.clientY } : null; }, true);
+  // Swiping right from the left edge (or across a detail sheet header) goes back from a sheet on touch screens.
+  {
+    let swipeStart = null;
+    window.addEventListener('pointerdown', (ev) => {
+      const inSheetHead = Boolean(ev.target.closest('.sheet-head'));
+      if (ev.clientX < 44 || (ev.pointerType === 'touch' && inSheetHead)) {
+        swipeStart = { x: ev.clientX, y: ev.clientY };
+      } else {
+        swipeStart = null;
+      }
+    }, true);
     window.addEventListener('pointerup', (ev) => {
-      const swiped = edge && ev.clientX - edge.x > 56 && Math.abs(ev.clientY - edge.y) < 80;
-      edge = null;
+      const swiped = swipeStart && ev.clientX - swipeStart.x > 64 && Math.abs(ev.clientY - swipeStart.y) < 90;
+      swipeStart = null;
       if (swiped && panel.closeSheet()) haptic('light');
     }, true);
-    window.addEventListener('pointercancel', () => { edge = null; }, true);
+    window.addEventListener('pointercancel', () => { swipeStart = null; }, true);
   }
   incoming.applyRemote = (update) => store.applyRemote(update);
   incoming.adopt = (state) => store.adopt(state);

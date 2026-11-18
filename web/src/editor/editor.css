@@ -591,4 +591,86 @@ html.mode-editor, html.mode-editor body { user-select: none; }
   pointer-events: none;
 }
 
+/* ---------- Touch-First Surface Pro 7 Floor Plan Editor Ergonomics ---------- */
+
+.plan {
+  touch-action: none;
+}
+
+button, .btn, .zoom-btn, .pe-btn, .chip, .row, .furn-swatch {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html.touch-ui .zoom-btn {
+  height: 36px;
+  min-width: 36px;
+  padding: 0 12px;
+  font-size: 12.5px;
+}
+html.touch-ui .pe-btn {
+  height: 34px;
+  padding: 0 11px;
+  font-size: 12px;
+  border-radius: 9px;
+}
+html.touch-ui .preview-toolbar .chip {
+  height: 34px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+html.touch-ui .bar .btn {
+  height: 36px;
+  padding: 0 13px;
+  font-size: 12.5px;
+}
+html.touch-ui .row {
+  min-height: 38px;
+}
+html.touch-ui .row-icon, html.touch-ui .del {
+  width: 30px;
+  height: 30px;
+}
+html.touch-ui .furn-swatch {
+  width: 34px;
+  height: 34px;
+}
+
+@media (pointer: coarse) {
+  .zoom-btn {
+    height: 36px;
+    min-width: 36px;
+    padding: 0 12px;
+    font-size: 12.5px;
+  }
+  .pe-btn {
+    height: 34px;
+    padding: 0 11px;
+    font-size: 12px;
+    border-radius: 9px;
+  }
+  .preview-toolbar .chip {
+    height: 34px;
+    padding: 0 12px;
+    font-size: 12px;
+  }
+  .bar .btn {
+    height: 36px;
+    padding: 0 13px;
+    font-size: 12.5px;
+  }
+  .row {
+    min-height: 38px;
+  }
+  .row-icon, .del {
+    width: 30px;
+    height: 30px;
+  }
+  .furn-swatch {
+    width: 34px;
+    height: 34px;
+  }
+}
+
+
 

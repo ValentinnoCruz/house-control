@@ -323,6 +323,7 @@ export function createWorld(canvas, config, store, { onHover, onPick, onMove, ed
   };
 
   let ecoMode = localStorage.getItem('house.ecoFps') !== '0';
+  let dprCap = Number(localStorage.getItem('house.dprCap') || 1.35) || 1.35;
   let lastUserTouchAt = performance.now();
   const markTouch = () => { lastUserTouchAt = performance.now(); };
 
@@ -697,11 +698,12 @@ export function createWorld(canvas, config, store, { onHover, onPick, onMove, ed
       }
       return;
     }
-    setHover(pick(ev));
+    if (ev.pointerType !== 'touch') setHover(pick(ev));
   });
 
   const release = (ev) => {
     fingers.delete(ev.pointerId);
+    if (ev.pointerType === 'touch') setHover(null);
     if (pinch) { if (!fingers.size) pinch = null; return; }
     if (dragItem) {
       const item = dragItem;
@@ -824,7 +826,7 @@ export function createWorld(canvas, config, store, { onHover, onPick, onMove, ed
     if (!r.width || !r.height) return;
     width = r.width;
     height = r.height;
-    const pr = Math.min(window.devicePixelRatio || 1, 2);
+    const pr = Math.min(window.devicePixelRatio || 1, dprCap);
     renderer.setPixelRatio(pr);
     renderer.setSize(width, height, false);
     composer.setPixelRatio(pr);
@@ -886,6 +888,12 @@ export function createWorld(canvas, config, store, { onHover, onPick, onMove, ed
       localStorage.setItem('house.ecoFps', ecoMode ? '1' : '0');
       markTouch();
       wake(4);
+    },
+    getDprCap() { return dprCap; },
+    setDprCap(cap) {
+      dprCap = clamp(Number(cap) || 1.35, 1, 2);
+      localStorage.setItem('house.dprCap', String(dprCap));
+      resize();
     },
     setWalkPadInput(forward = 0, rightDir = 0) {
       markTouch();
